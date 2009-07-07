@@ -1,10 +1,38 @@
 from twisted.web import server
 from twisted.internet import reactor
+import zlib, struct, time
 
 try:
     import json
 except ImportError:
     import simplejson as json
+
+# gzip from cherrypy
+def _compress(body, compress_level):
+    """Compress 'body' at the given compress_level."""
+    
+    yield '\037\213'      # magic header
+    yield '\010'         # compression method
+    yield '\0'
+    yield struct.pack("<L", long(time.time()))
+    yield '\002'
+    yield '\377'
+    
+    crc = zlib.crc32("")
+    size = 0
+    zobj = zlib.compressobj(compress_level,
+                            zlib.DEFLATED, -zlib.MAX_WBITS,
+                            zlib.DEF_MEM_LEVEL, 0)
+    for line in body:
+        size += len(line)
+        crc = zlib.crc32(line, crc)
+        yield zobj.compress(line)
+    yield zobj.flush()
+    yield struct.pack("<l", crc)
+    yield struct.pack("<L", size & 0xFFFFFFFFL)
+
+def compress(body):
+    return "".join([x for x in _compress(body, 6)])
 
 class CSPSession(object):
     def __init__(self, key, request):
@@ -38,9 +66,13 @@ class CSPSession(object):
                 newVal = request.args.get(key)[0]
                 varType = self.permVars[key].__class__
                 try:
-                    self.permVars[key] = varType(newVal)
+                    typedVal = varType(newVal)
+                    if key == "g" and self.request and self.permVars["g"] != typedVal:
+                        # SPEC NOTE: end request that changes encoding mid-stream
+                        self.endStream()
+                    self.permVars[key] = typedVal
                     if key == "ps":
-                        self.prebuffer = " "*self.permVars[key]
+                        self.prebuffer = " "*typedVal
                 except:
                     pass
         ack = request.args.get("a",["-1"])[0]
@@ -63,11 +95,12 @@ class CSPSession(object):
     def setReadCb(self, cb):
         self.readCb = cb
 
-    def setDurationTimeout(self):
+    def resetDurationTimeout(self):
         if self.durationTimeout:
             self.durationTimeout.cancel()
             self.durationTimeout = None
-        self.durationTimeout = reactor.callLater(self.permVars["du"], self.durationCb)
+        if self.request:
+            self.durationTimeout = reactor.callLater(self.permVars["du"], self.durationCb)
 
     def resetIntervalTimeout(self):
         if self.intervalTimeout:
@@ -77,14 +110,30 @@ class CSPSession(object):
             self.intervalTimeout = reactor.callLater(self.permVars["i"], self.intervalCb)
 
     def durationCb(self):
-        self.durationTimeout = None
-        self.request.finish()
-        self.request = None
+        self.endStream()
         self.resetIntervalTimeout()
 
     def intervalCb(self):
         self.intervalTimeout = None
         self.sendPackets([])
+
+    def endStream(self):
+        self.request.finish()
+        self.request = None
+        self.resetIntervalTimeout()
+        self.resetDurationTimeout()
+
+    def tryCompress(self, data, request=None):
+        if request is None:
+            request = self.request
+        if self.permVars["g"] and "gzip" in (request.getHeader("Accept-Encoding") or ""):
+            request.setHeader("Content-Encoding", "gzip")
+            return compress(data)
+        return data
+
+    def returnNow(self):
+        self.request = None
+        return tryCompress(self.renderPrebuffer() + self.renderPackets())
 
     def setCometRequest(self, request):
         self.request = request
@@ -94,25 +143,23 @@ class CSPSession(object):
 
         # polling
         if self.permVars['du'] == 0: # SPEC NOTE: du=0 overrides is=1
-            self.request = None
-            return self.renderPrebuffer() + self.renderPackets()
+            return returnNow()
 
         # streaming/long-polling, no immediate response
         if not self.buffer:
-            self.setDurationTimeout()
+            self.resetDurationTimeout()
             self.resetIntervalTimeout()
             return server.NOT_DONE_YET
         
         # streaming
         if self.permVars["is"]:
-            request.write(self.renderPrebuffer())
+            request.write(tryCompress(self.renderPrebuffer()))
             self.sendPackets()
-            self.setDurationTimeout()
+            self.resetDurationTimeout()
             return server.NOT_DONE_YET
         # long-polling
         else:
-            self.request = None
-            return self.renderPrebuffer() + self.renderPackets()
+            return returnNow()
 
     def close(self):
         self.sendPackets([None])
@@ -132,7 +179,7 @@ class CSPSession(object):
 
     def sendPackets(self, packets=None):
         self.resetIntervalTimeout()
-        self.request.write(self.renderPackets(packets))
+        self.request.write(tryCompress(self.renderPackets(packets)))
 
     def renderPrebuffer(self):
         return "%s%s"%(self.prebuffer, self.permVars["p"])
@@ -146,5 +193,5 @@ class CSPSession(object):
         sseid += "\r\n"
         return "%s(%s)%s%s"%(self.permVars["bp"], json.dumps(packets), self.permVars["bs"], sseid)
     
-    def renderRequest(self, data):
-        return "%s(%s)%s"%(self.permVars["rp"], json.dumps(data), self.permVars["rs"])
+    def renderRequest(self, data, request):
+        return self.tryCompress("%s(%s)%s"%(self.permVars["rp"], json.dumps(data), self.permVars["rs"]), request)

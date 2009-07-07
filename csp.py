@@ -45,15 +45,15 @@ class CSPLogicResource(resource.Resource):
         session = CSPSession(key, request)
         self.root.sessions[key] = session
         self.root.connectCb(session)
-        return session.renderRequest(key)
+        return session.renderRequest(key, request)
 
     def render_close(self, session, request):
         session.close()
-        return "OK"
+        return session.renderRequest("OK", request)
 
     def render_send(self, session, request):
         session.readCb(request.args.get("d", [""])[0])
-        return "OK"
+        return session.renderRequest("OK", request)
 
     def render_reflect(self, session, request):
         return request.args.get("d", [""])[0]
