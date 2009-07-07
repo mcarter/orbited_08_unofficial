@@ -110,8 +110,8 @@ class CSPSession(object):
             self.intervalTimeout = reactor.callLater(self.permVars["i"], self.intervalCb)
 
     def durationCb(self):
+        self.durationTimeout = None
         self.endStream()
-        self.resetIntervalTimeout()
 
     def intervalCb(self):
         self.intervalTimeout = None
@@ -127,13 +127,15 @@ class CSPSession(object):
         if request is None:
             request = self.request
         if self.permVars["g"] and "gzip" in (request.getHeader("Accept-Encoding") or ""):
-            request.setHeader("Content-Encoding", "gzip")
-            return compress(data)
+            cdata = compress(data)
+            if request is self.request or len(cdata) < len(data):
+                request.setHeader("Content-Encoding", "gzip")
+                return cdata
         return data
 
     def returnNow(self):
         self.request = None
-        return tryCompress(self.renderPrebuffer() + self.renderPackets())
+        return self.tryCompress(self.renderPrebuffer() + self.renderPackets())
 
     def setCometRequest(self, request):
         self.request = request
@@ -153,7 +155,7 @@ class CSPSession(object):
         
         # streaming
         if self.permVars["is"]:
-            request.write(tryCompress(self.renderPrebuffer()))
+            request.write(self.tryCompress(self.renderPrebuffer()))
             self.sendPackets()
             self.resetDurationTimeout()
             return server.NOT_DONE_YET
@@ -179,7 +181,7 @@ class CSPSession(object):
 
     def sendPackets(self, packets=None):
         self.resetIntervalTimeout()
-        self.request.write(tryCompress(self.renderPackets(packets)))
+        self.request.write(self.tryCompress(self.renderPackets(packets)))
 
     def renderPrebuffer(self):
         return "%s%s"%(self.prebuffer, self.permVars["p"])
