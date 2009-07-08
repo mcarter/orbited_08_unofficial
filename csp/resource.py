@@ -19,7 +19,7 @@ class CSPRootResource(resource.Resource):
         self.connectCb = cb
 
     def connectCb(self, session):
-        print "%s connected"%(session,)
+        print 'CSPRootResource.setConnectCb not called. session "%s" connected'%(session,)
 
     def disconnectCb(self, session):
         print 'destroying session',session.key

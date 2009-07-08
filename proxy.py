@@ -12,6 +12,7 @@ CODES = {
     'RemoteConnectionTimeout': 104,
     'Unauthorized': 106,
     'RemoteConnectionFailed': 108,
+    'RemoteConnectionClosed': 109,
     'ProtocolError': 110
 }
 
@@ -27,7 +28,7 @@ class Outgoing(protocol.Protocol):
         self.incoming.write([FRAME_DATA, self.socketId, data])
 
     def connectionLost(self, reason):
-        self.incoming.closeStream(self.socketId, 'RemoteConnectionFailed')
+        self.incoming.closeStream(self.socketId, 'RemoteConnectionClosed')
 
 class Incoming(protocol.Protocol):
     def connectionMade(self):
@@ -38,6 +39,7 @@ class Incoming(protocol.Protocol):
 
     def write(self, rawdata):
         data = json.dumps(rawdata)
+        print "write:",data
         self.transport.write("%s,%s"%(len(data), data))
 
     def connectionLost(self):
@@ -66,6 +68,7 @@ class Incoming(protocol.Protocol):
     def newOutgoing(self, outgoing):
         key = outgoing.socketId
         self.sockets[key] = outgoing
+        self.write([FRAME_OPEN, key])
         for frame in self.buffers[key]:
             self.processFrame(*frame)
         del self.buffers[key]
@@ -75,7 +78,7 @@ class Incoming(protocol.Protocol):
             return self.closeStream(socketId, 'UserConnectionReset')
         if frameType != FRAME_DATA:
             return self.closeStream(socketId, 'ProtocolError')
-        self.sockets[socketId].transport.write(data)
+        self.sockets[socketId].transport.write(str(data[0]))
 
     def dataReceived(self, rawdata=""):
         print 'dataReceived:',rawdata
@@ -105,7 +108,7 @@ class Incoming(protocol.Protocol):
 
         # established stream
         if socketId in self.sockets:
-            processFrame(*frame)
+            self.processFrame(*frame)
 
         # handshake
         else:
