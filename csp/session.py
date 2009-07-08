@@ -1,42 +1,20 @@
 from twisted.web import server
 from twisted.internet import reactor
-import zlib, struct, time
-
-try:
-    import json
-except ImportError:
-    import simplejson as json
-
-# gzip from cherrypy
-def _compress(body, compress_level):
-    """Compress 'body' at the given compress_level."""
-    
-    yield '\037\213'      # magic header
-    yield '\010'         # compression method
-    yield '\0'
-    yield struct.pack("<L", long(time.time()))
-    yield '\002'
-    yield '\377'
-    
-    crc = zlib.crc32("")
-    size = 0
-    zobj = zlib.compressobj(compress_level,
-                            zlib.DEFLATED, -zlib.MAX_WBITS,
-                            zlib.DEF_MEM_LEVEL, 0)
-    for line in body:
-        size += len(line)
-        crc = zlib.crc32(line, crc)
-        yield zobj.compress(line)
-    yield zobj.flush()
-    yield struct.pack("<l", crc)
-    yield struct.pack("<L", size & 0xFFFFFFFFL)
-
-def compress(body):
-    return "".join([x for x in _compress(body, 6)])
+from util import json, compress
 
 class CSPSession(object):
-    def __init__(self, key, request):
+    def __init__(self, key, request, destroySessionCb):
+        self.peer = request.client
+        self.host = request.host
+        self.destroySessionCb = destroySessionCb
         self.key = key
+        self.request = None
+        self.prebuffer = ""
+        self.buffer = []
+        self.sendId = 0
+        self.durationTimeout = None
+        self.intervalTimeout = None
+        self.isClosed = False
         self.permVars = {
             "rp":"",
             "rs":"",
@@ -51,13 +29,7 @@ class CSPSession(object):
             "se":False,
             "ct":"text/html" # SPEC NOTE: changed this default from text/plain
         }
-        self.request = None
-        self.prebuffer = ""
-        self.buffer = []
-        self.sendId = 0
         self.updateVars(request)
-        self.durationTimeout = None
-        self.intervalTimeout = None
 
     def updateVars(self, request):
         # SPEC NOTE: ignore any permanent variable that can't be parsed
@@ -82,18 +54,8 @@ class CSPSession(object):
             ack = -1
         while self.buffer and ack >= self.buffer[0][0]:
             self.buffer.pop(0)
-
-    def closeCb(self):
-        print "CSPSession.closeCb not set!"
-
-    def readCb(self, data):
-        print "CSPSession.readCb not set!"
-
-    def setCloseCb(self, cb):
-        self.closeCb = cb
-
-    def setReadCb(self, cb):
-        self.readCb = cb
+        if self.isClosed and not self.buffer:
+            self.destroySessionCb(self)
 
     def resetDurationTimeout(self):
         if self.durationTimeout:
@@ -134,8 +96,9 @@ class CSPSession(object):
         return data
 
     def returnNow(self):
+        s = self.tryCompress(self.renderPrebuffer() + self.renderPackets())
         self.request = None
-        return self.tryCompress(self.renderPrebuffer() + self.renderPackets())
+        return s
 
     def setCometRequest(self, request):
         self.request = request
@@ -145,7 +108,7 @@ class CSPSession(object):
 
         # polling
         if self.permVars['du'] == 0: # SPEC NOTE: du=0 overrides is=1
-            return returnNow()
+            return self.returnNow()
 
         # streaming/long-polling, no immediate response
         if not self.buffer:
@@ -161,11 +124,15 @@ class CSPSession(object):
             return server.NOT_DONE_YET
         # long-polling
         else:
-            return returnNow()
+            return self.returnNow()
 
     def close(self):
-        self.sendPackets([None])
-        self.closeCb()
+        if not self.isClosed:
+            self.write(None) # SPEC NOTE: close packet is now data packet with data=None
+            self.protocol.connectionLost()
+            self.isClosed = True
+            if not self.buffer:
+                self.destroySessionCb(self)
 
     def write(self, data):
         self.sendId += 1
@@ -178,6 +145,24 @@ class CSPSession(object):
                 # XXX: This may cause transfer-encoding chunked in long polling mode. FIX
                 self.request.finish()
                 self.request = None
+                self.resetDurationTimeout()
+
+    def writeSequence(self, data):
+        for datum in data:
+            self.write(datum)
+
+    def loseConnection(self):
+        self.close()
+
+    def getHost(self):
+        return self.host
+
+    def getPeer(self):
+        return self.peer
+
+    def read(self, data):
+        # TODO: parse packets, throw out duplicates, forward new ones to protocol
+        self.protocol.dataReceived(data)
 
     def sendPackets(self, packets=None):
         self.resetIntervalTimeout()
@@ -189,10 +174,9 @@ class CSPSession(object):
     def renderPackets(self, packets=None):
         if packets is None:
             packets = self.buffer
-        sseid = ""
+        sseid = "\r\n"
         if self.permVars["se"] and packets:
-            sseid = "id: %s\r\n"%(packets[-1][0],)
-        sseid += "\r\n"
+            sseid = "id: %s\r\n\r\n"%(packets[-1][0],)
         return "%s(%s)%s%s"%(self.permVars["bp"], json.dumps(packets), self.permVars["bs"], sseid)
     
     def renderRequest(self, data, request):

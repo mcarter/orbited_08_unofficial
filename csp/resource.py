@@ -20,6 +20,9 @@ class CSPRootResource(resource.Resource):
     def connectCb(self, session):
         print "%s connected"%(session,)
 
+    def disconnectCb(self, session):
+        del self.sessions[session.key]
+
 class CSPLogicResource(resource.Resource):
     def __init__(self, root):
         resource.Resource.__init__(self)
@@ -42,7 +45,7 @@ class CSPLogicResource(resource.Resource):
 
     def render_handshake(self, session, request):
         key = "a"#str(uuid.uuid4()).replace('-', '')
-        session = CSPSession(key, request)
+        session = CSPSession(key, request, self.root.disconnectCb)
         self.root.sessions[key] = session
         self.root.connectCb(session)
         return session.renderRequest(key, request)
@@ -52,7 +55,7 @@ class CSPLogicResource(resource.Resource):
         return session.renderRequest("OK", request)
 
     def render_send(self, session, request):
-        session.readCb(request.args.get("d", [""])[0])
+        session.read(request.args.get("d", [""])[0])
         return session.renderRequest("OK", request)
 
     def render_reflect(self, session, request):
