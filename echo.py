@@ -9,6 +9,6 @@ class EchoFactory(protocol.Factory):
     protocol = Echo
 
 if __name__ == "__main__":
-    print "listening CSP@8050"
+    print "echo listening on CSP@8050"
     reactor.listenWith(CometPort, port=8050, factory=EchoFactory())
     reactor.run()

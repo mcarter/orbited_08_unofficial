@@ -20,20 +20,21 @@ class CometPort(object):
     """
     implements(interfaces.IListeningPort)
 
-    def __init__(self, port=None, factory=None, backlog=50, interface='', reactor=None, resource=None, childName=None):
+    def __init__(self, port=None, factory=None, backlog=50, interface='', reactor=None, resource=None, childName=None, killTimeout=10):
         self.port = port
         self.factory = factory
         self.backlog = backlog
         self.interface = interface
         self.resource = resource
         self.childName = childName
+        self.killTimeout = killTimeout
         self.cspTcpPort = None
         self.listening = False
 
     def startListening(self):
         if not self.listening:
             self.listening = True
-            csp = CSPRootResource()
+            csp = CSPRootResource(self.killTimeout)
             csp.setConnectCb(self.connectionMade)
             if self.port:
                 self.cspTcpPort = reactor.listenTCP(8050, server.Site(csp), self.backlog, self.interface)

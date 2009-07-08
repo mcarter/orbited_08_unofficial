@@ -3,7 +3,7 @@ from twisted.web import resource, static
 from session import CSPSession
 
 class CSPRootResource(resource.Resource):
-    def __init__(self):
+    def __init__(self, killTimeout):
         resource.Resource.__init__(self)
         logic = CSPLogicResource(self)
         self.putChild("comet", logic)
@@ -12,6 +12,7 @@ class CSPRootResource(resource.Resource):
         self.putChild("send", logic)
         self.putChild("reflect", logic)
         self.putChild("static", static.File(os.path.join(os.path.dirname(__file__), 'static')))
+        self.killTimeout = killTimeout
         self.sessions = {}
 
     def setConnectCb(self, cb):
@@ -21,6 +22,7 @@ class CSPRootResource(resource.Resource):
         print "%s connected"%(session,)
 
     def disconnectCb(self, session):
+        print 'destroying session',session.key
         del self.sessions[session.key]
 
 class CSPLogicResource(resource.Resource):
@@ -45,7 +47,7 @@ class CSPLogicResource(resource.Resource):
 
     def render_handshake(self, session, request):
         key = "a"#str(uuid.uuid4()).replace('-', '')
-        session = CSPSession(key, request, self.root.disconnectCb)
+        session = CSPSession(key, request, self.root.disconnectCb, self.root.killTimeout)
         self.root.sessions[key] = session
         self.root.connectCb(session)
         return session.renderRequest(key, request)

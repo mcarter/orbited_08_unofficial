@@ -3,17 +3,20 @@ from twisted.internet import reactor
 from util import json, compress
 
 class CSPSession(object):
-    def __init__(self, key, request, destroySessionCb):
+    # SPEC NOTE: added killTimeout (defaults to 10 seconds)
+    def __init__(self, key, request, destroySessionCb, killTimeout):
         self.peer = request.client
         self.host = request.host
         self.destroySessionCb = destroySessionCb
+        self.killTimeout = killTimeout
         self.key = key
         self.request = None
         self.prebuffer = ""
         self.buffer = []
         self.sendId = 0
-        self.durationTimeout = None
-        self.intervalTimeout = None
+        self.durationTimer = None
+        self.intervalTimer = None
+        self.killTimer = None
         self.isClosed = False
         self.permVars = {
             "rp":"",
@@ -55,35 +58,50 @@ class CSPSession(object):
         while self.buffer and ack >= self.buffer[0][0]:
             self.buffer.pop(0)
         if self.isClosed and not self.buffer:
-            self.destroySessionCb(self)
+            self.teardown()
 
-    def resetDurationTimeout(self):
-        if self.durationTimeout:
-            self.durationTimeout.cancel()
-            self.durationTimeout = None
+    def teardown(self):
+        self.resetKillTimer()
         if self.request:
-            self.durationTimeout = reactor.callLater(self.permVars["du"], self.durationCb)
+            self.endStream()
+        self.destroySessionCb(self)
 
-    def resetIntervalTimeout(self):
-        if self.intervalTimeout:
-            self.intervalTimeout.cancel()
-            self.intervalTimeout = None
+    def resetKillTimer(self, cb=None):
+        if self.killTimer:
+            if self.killTimer.active():
+                self.killTimer.cancel()
+            self.killTimer = None
+        if cb:
+            self.killTimer = reactor.callLater(self.killTimeout, cb)
+
+    def resetDurationTimer(self):
+        if self.durationTimer:
+            self.durationTimer.cancel()
+            self.durationTimer = None
+        if self.request:
+            self.durationTimer = reactor.callLater(self.permVars["du"], self.durationCb)
+
+    def resetIntervalTimer(self):
+        if self.intervalTimer:
+            self.intervalTimer.cancel()
+            self.intervalTimer = None
         if self.request and self.permVars["i"] > 0 and self.permVars["is"]:
-            self.intervalTimeout = reactor.callLater(self.permVars["i"], self.intervalCb)
+            self.intervalTimer = reactor.callLater(self.permVars["i"], self.intervalCb)
 
     def durationCb(self):
-        self.durationTimeout = None
+        self.durationTimer = None
+        self.resetKillTimer(self.close)
         self.endStream()
 
     def intervalCb(self):
-        self.intervalTimeout = None
+        self.intervalTimer = None
         self.sendPackets([])
 
     def endStream(self):
         self.request.finish()
         self.request = None
-        self.resetIntervalTimeout()
-        self.resetDurationTimeout()
+        self.resetIntervalTimer()
+        self.resetDurationTimer()
 
     def tryCompress(self, data, request=None):
         if request is None:
@@ -101,6 +119,8 @@ class CSPSession(object):
         return s
 
     def setCometRequest(self, request):
+        self.resetKillTimer()
+
         self.request = request
 
         request.setHeader("Content-Type", self.permVars["ct"])
@@ -112,15 +132,15 @@ class CSPSession(object):
 
         # streaming/long-polling, no immediate response
         if not self.buffer:
-            self.resetDurationTimeout()
-            self.resetIntervalTimeout()
+            self.resetDurationTimer()
+            self.resetIntervalTimer()
             return server.NOT_DONE_YET
-        
+
         # streaming
         if self.permVars["is"]:
             request.write(self.tryCompress(self.renderPrebuffer()))
             self.sendPackets()
-            self.resetDurationTimeout()
+            self.resetDurationTimer()
             return server.NOT_DONE_YET
         # long-polling
         else:
@@ -131,8 +151,7 @@ class CSPSession(object):
             self.write(None) # SPEC NOTE: close packet is now data packet with data=None
             self.protocol.connectionLost()
             self.isClosed = True
-            if not self.buffer:
-                self.destroySessionCb(self)
+            self.resetKillTimer(self.teardown)
 
     def write(self, data):
         self.sendId += 1
@@ -141,11 +160,8 @@ class CSPSession(object):
             if self.permVars["is"]:
                 self.sendPackets([[self.sendId, data]])
             else:
-                self.sendPackets()
-                # XXX: This may cause transfer-encoding chunked in long polling mode. FIX
-                self.request.finish()
-                self.request = None
-                self.resetDurationTimeout()
+                self.sendPackets(finish=True)
+                self.resetDurationTimer()
 
     def writeSequence(self, data):
         for datum in data:
@@ -161,12 +177,18 @@ class CSPSession(object):
         return self.peer
 
     def read(self, data):
-        # TODO: parse packets, throw out duplicates, forward new ones to protocol
+        # TODO: parse packets, throw out duplicates, forward to protocol
         self.protocol.dataReceived(data)
 
-    def sendPackets(self, packets=None):
-        self.resetIntervalTimeout()
-        self.request.write(self.tryCompress(self.renderPackets(packets)))
+    def sendPackets(self, packets=None, finish=False):
+        self.resetIntervalTimer()
+        data = self.tryCompress(self.renderPackets(packets))
+        if finish:
+            self.request.setHeader('Content-Length', len(data))
+        self.request.write(data)
+        if finish:
+            self.request.finish()
+            self.request = None
 
     def renderPrebuffer(self):
         return "%s%s"%(self.prebuffer, self.permVars["p"])
