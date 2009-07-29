@@ -202,4 +202,6 @@ class CSPSession(object):
         return "%s(%s)%s%s"%(self.permVars["bp"], json.dumps(packets), self.permVars["bs"], sseid)
     
     def renderRequest(self, data, request):
+        # SPEC NOTE: Content-type is set for _all_ requests (not just comet requests)
+        request.setHeader('Content-type', self.permVars['ct'])
         return self.tryCompress("%s(%s)%s"%(self.permVars["rp"], json.dumps(data), self.permVars["rs"]), request)
