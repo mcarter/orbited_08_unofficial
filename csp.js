@@ -1,5 +1,7 @@
+;(function() {
+
 var id = 0;
-var csp = {
+csp = {
     'readyState': {
         'initial': 0,
         'opening': 1,
@@ -155,3 +157,5 @@ transports.jsonp = function(cspId, url) {
     document.body.appendChild(ifr.comet);
     killLoadingBar();
 }
+
+})();

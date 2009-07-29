@@ -1,0 +1,27 @@
+<html>
+<script src="csp.js"></script>
+<script src="socket.js"></script>
+<script>
+ function csp_connect() {
+    c = new csp.CometSession(); 
+    c.onread = function(data) {
+        console.log('onread', data);
+    }
+    c.onopen = function() { 
+        console.log('onopen');
+    }
+    c.onclose = function() {
+        console.log('onclose');
+    }
+    c.connect('http://localhost:8050'); 
+    return c;
+ }
+ function tcp_connect() {
+    c = new socket.TCPSocket();
+    c.open("localhost",8888);
+ }
+</script>
+<body>
+</body>
+
+</html>

@@ -25,7 +25,7 @@ class Outgoing(protocol.Protocol):
         self.incoming.newOutgoing(self)
 
     def dataReceived(self, data):
-        self.incoming.write([FRAME_DATA, self.socketId, data])
+        self.incoming.write([self.socketId, FRAME_DATA, data])
 
     def connectionLost(self, reason):
         self.incoming.closeStream(self.socketId, 'RemoteConnectionClosed')
@@ -63,17 +63,17 @@ class Incoming(protocol.Protocol):
                 del self.sockets[socketId]
             if socketId in self.buffers:
                 del self.buffers[socketId]
-            self.write([FRAME_CLOSE, socketId, CODES[code]])
+            self.write([socketId, FRAME_CLOSE, CODES[code]])
 
     def newOutgoing(self, outgoing):
         key = outgoing.socketId
         self.sockets[key] = outgoing
-        self.write([FRAME_OPEN, key])
+        self.write([key, FRAME_OPEN])
         for frame in self.buffers[key]:
             self.processFrame(*frame)
         del self.buffers[key]
 
-    def processFrame(self, frameType, socketId, *data):
+    def processFrame(self, socketId, frameType, *data):
         if frameType == FRAME_CLOSE:
             return self.closeStream(socketId, 'UserConnectionReset')
         if frameType != FRAME_DATA:
@@ -104,7 +104,7 @@ class Incoming(protocol.Protocol):
         # extract basic frame info
         if len(frame) < 3:
             return self.fatalError("illegal frame")
-        frameType, socketId, data = frame[0], frame[1], frame[2:]
+        socketId, frameType, data = frame[0], frame[1], frame[2:]
 
         # established stream
         if socketId in self.sockets:
@@ -120,7 +120,7 @@ class Incoming(protocol.Protocol):
                 host, port = data
             except:
                 return self.closeStream(socketId, 'InvalidHandshake')
-            if False: # here, make sure this connection is allowed
+            if False: # XXX: here, make sure this connection is allowed
                 return self.closeStream(socketId, 'Unauthorized')
             out = protocol.ClientCreator(reactor, Outgoing, self, socketId)
             out.connectTCP(host, port).addErrback(self.closeStream, socketId, 'RemoteConnectionFailed')
