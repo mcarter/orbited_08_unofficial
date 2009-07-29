@@ -1,4 +1,4 @@
-import os, uuid
+import os, uuid, cgi
 from twisted.web import resource, static
 from session import CSPSession
 
@@ -31,6 +31,8 @@ class CSPLogicResource(resource.Resource):
         self.root = root
 
     def render(self, request):
+        if request.method.lower() == 'post':
+            request.args = cgi.parse_qs(request.content.read())
         path = request.path.rsplit('/',1)[1]
         session = None
         if path != "handshake":
@@ -40,6 +42,10 @@ class CSPLogicResource(resource.Resource):
                 return "error! no such session."
             session = self.root.sessions[key]
             session.updateVars(request)
+
+        # XXX: obviously change this
+        request.setHeader('Access-Control-Allow-Origin','*')
+
         return getattr(self, "render_%s"%(path,))(session, request)
 
     def render_comet(self, session, request):

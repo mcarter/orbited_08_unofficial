@@ -25,6 +25,18 @@ csp._cb.add = function(cspId, transport) {
     }
 }
 
+csp.vars = {
+    'poll_interval': 2000 // XXX: make this legit...
+};
+
+var PARAMS = {
+    'xhrstream':   {"is": "1", "bs": "\n"},
+    'xhrpoll':     {"du": "0"},
+    'xhrlongpoll': {},
+    'sselongpoll': {"bp": "data: ", "bs": "\r\n", "se": "1"},
+    'ssestream':   {"bp": "data: ", "bs": "\r\n", "se": "1", "is": "1"}
+};
+
 csp.CometSession = function() {
     var self = this;
     self.id = ++id;
@@ -50,7 +62,12 @@ csp.CometSession = function() {
     self.connect = function(url) {
         self.readyState = csp.readyState.opening;
         self.url = url;
-        transport = new transports.jsonp(self.id, url);
+        //transport = new transports.jsonp(self.id, url);
+
+
+        transport = new transports.xhr(self.id, url, PARAMS.xhrlongpoll);
+
+
         csp._cb.add(self.id, transport);
         transport.onHandshake = function(key) {
             self.readyState = csp.readyState.open;
@@ -90,14 +107,14 @@ var Transport = function(cspId, url) {
         this.reconnect();
     }
     this.cbHandshake = function(data) {
-//        console.log("HAND SHOOK:", data);
+        console.log("HAND SHOOK:", data);
         this.onHandshake(data);
     }
     this.cbSend = function(data) {
-//        console.log("SEND STATUS:", data);
+        console.log("SEND STATUS:", data);
     }
     this.cbComet = function(data) {
-//        console.log("RECEIVED:", data);
+        console.log("RECEIVED:", data);
         this.processPackets(data);
         this.reconnect();
     }
@@ -105,11 +122,64 @@ var Transport = function(cspId, url) {
 
 var transports = {};
 
+transports.xhr = function(cspId, url, params) {
+    var self = this;
+    Transport.call(self, cspId, url);
+    if (params.du == "0")
+        var interval = csp.vars.poll_interval;
+    else
+        var interval = 0;
+
+    var createXHR = function() {
+        try { return new XMLHttpRequest(); } catch(e) {}
+        try { return new ActiveXObject('MSXML3.XMLHTTP'); } catch(e) {}
+        try { return new ActiveXObject('MSXML2.XMLHTTP.3.0'); } catch(e) {}
+        try { return new ActiveXObject('Msxml2.XMLHTTP'); } catch(e) {}
+        try { return new ActiveXObject('Microsoft.XMLHTTP'); } catch(e) {}
+        throw new Error('Could not find XMLHttpRequest or an alternative.');
+    }
+    var xhr = {
+        'handshake': createXHR(),
+        'send': createXHR(),
+        'comet': createXHR()
+    };
+
+    var doXHR = function(type, cb, data) {
+        if (true) { // TODO: something in settings...
+            try {
+                netscape.security.PrivilegeManager.enablePrivilege('UniversalBrowserRead');
+            } catch (ex) {alert(ex) }
+        }
+        xhr[type].open('POST', self.url + "/" + type, true);
+        xhr[type].onreadystatechange = function() {
+            if (xhr[type].readyState == 4) {
+                cb.apply(self, [eval(xhr[type].responseText)]);
+            }
+        }
+        xhr[type].send(data);
+    }
+
+    self.handshake = function() {
+        var qs = "";
+        for (param in params)
+            qs += param + "=" + params[param] + "&";
+        doXHR("handshake", self.cbHandshake, qs);
+    }
+    self.send = function(data) {
+        doXHR("send", self.cbSend, "s=" + self.sessionKey + "&d=" + data);
+    }
+    self.reconnect = function() {
+        window.setTimeout(function() {
+            doXHR("comet", self.cbComet, "s=" + self.sessionKey + "&a=" + self.lastEventId);
+        }, interval);
+    }
+}
+
 transports.jsonp = function(cspId, url) {
     var self = this;
     Transport.call(self, cspId, url);
 
-    var makeIframe = function() {
+    var createIframe = function() {
         var i = document.createElement("iframe");
         i.style.display = 'block';
         i.style.width = '0';
@@ -122,9 +192,9 @@ transports.jsonp = function(cspId, url) {
         return i;
     }
     var ifr = {};
-    ifr.bar = makeIframe();
-    ifr.send = makeIframe();
-    ifr.comet = makeIframe();
+    ifr.bar = createIframe();
+    ifr.send = createIframe();
+    ifr.comet = createIframe();
 
     var killLoadingBar = function() {
         window.setTimeout(function() {
@@ -132,7 +202,7 @@ transports.jsonp = function(cspId, url) {
             document.body.removeChild(ifr.bar);
         }, 0);
     }
-    var cspRequest = function(rType, url) { // add timeout?
+    var doJSONP = function(rType, url) { // add timeout?
         var i = ifr[rType].contentDocument;
         var s = i.createElement("script");
         s.src = self.url + url;
@@ -141,15 +211,15 @@ transports.jsonp = function(cspId, url) {
     }
     self.handshake = function() {
         window.setTimeout(function() {
-            cspRequest("send", "/handshake?rs=;&rp=parent.csp._cb.i" + self.cspId + ".handshake");
+            doJSONP("send", "/handshake?rs=;&rp=parent.csp._cb.i" + self.cspId + ".handshake");
         }, 0);
     }
     self.send = function(data) {
-        cspRequest("send", "/send?s=" + self.sessionKey + "&rs=;&rp=parent.csp._cb.i" + self.cspId + ".send&d=" + data);
+        doJSONP("send", "/send?s=" + self.sessionKey + "&rs=;&rp=parent.csp._cb.i" + self.cspId + ".send&d=" + data);
     }
     self.reconnect = function() {
         window.setTimeout(function() {
-            cspRequest("comet", "/comet?bs=;&bp=parent.csp._cb.i" + self.cspId + ".comet&s=" + self.sessionKey + "&a=" + self.lastEventId);
+            doJSONP("comet", "/comet?bs=;&bp=parent.csp._cb.i" + self.cspId + ".comet&s=" + self.sessionKey + "&a=" + self.lastEventId);
         }, 0);
     }
 
