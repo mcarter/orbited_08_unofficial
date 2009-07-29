@@ -1,0 +1,55 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html>
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+  <title>Orbited In-browser IRC</title>
+  <link rel="stylesheet" href="chat.css" />
+  <script src="../csp.js"></script>
+  <script src="../socket.js"></script>
+  <script>
+    TCPSocket = socket.TCPSocket
+  </script>
+  <script src="irc2.js"></script>
+  <script src="chat.js"></script>
+  <script src="jquery.js"></script>
+  <script>
+    ENTER_KEY = 13
+    
+    $(function(){
+      $('#nickname').focus();
+      
+      $('#nickname').keypress( function(e) {
+        var key = e.charCode || e.keyCode || 0
+        if (key == ENTER_KEY) {
+          connect();
+        };
+      });
+      
+      $('#chatbox_input').keypress(function(e) {
+        var key = e.charCode || e.keyCode || 0;
+        if (key == ENTER_KEY) {
+          chat();
+          return false;
+        };
+      });
+    });
+  </script>
+</head>
+<body>
+  <div class="chatbox">
+    <div id="signin_popup">
+      <h2>Sign in to the #orbited chat room.</h2>
+      <label for="nickname">Nickname:</label>
+      <input type="text" id="nickname" maxlength="16" value="" />
+    </div>
+    <div id="absorb_clicks" onclick=""></div>
+    <div class="left_column">
+      <div class="chathistory" id="chathistory">
+      </div>
+      <textarea name="message" class="chatbox_input" id="chatbox_input" rows="2" cols="50"></textarea>
+    </div>
+    <div class="user_list" id="user_list">
+    </div>
+  </div>
+</body>
+</html>
