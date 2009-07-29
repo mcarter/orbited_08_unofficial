@@ -52,11 +52,11 @@ class CSPLogicResource(resource.Resource):
         return session.setCometRequest(request)
 
     def render_handshake(self, session, request):
-        key = "a"#str(uuid.uuid4()).replace('-', '')
+        key = str(uuid.uuid4()).replace('-', '')
         session = CSPSession(key, request, self.root.disconnectCb, self.root.killTimeout)
         self.root.sessions[key] = session
         self.root.connectCb(session)
-        return session.renderRequest(key, request)
+        return session.renderRequest({"session":key}, request)
 
     def render_close(self, session, request):
         session.close()

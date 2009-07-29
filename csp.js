@@ -62,19 +62,21 @@ csp.CometSession = function() {
     self.connect = function(url) {
         self.readyState = csp.readyState.opening;
         self.url = url;
-        //transport = new transports.jsonp(self.id, url);
 
 
-        transport = new transports.xhr(self.id, url, PARAMS.xhrlongpoll);
+        transport = new transports.jsonp(self.id, url);
+
+
+//        transport = new transports.xhr(self.id, url, PARAMS.xhrlongpoll);
 
 
         csp._cb.add(self.id, transport);
-        transport.onHandshake = function(key) {
+        transport.onHandshake = function(data) {
             self.readyState = csp.readyState.open;
-            self.sessionKey = key;
+            self.sessionKey = data.session;
             self.write = transport.send;
             transport.onPacket = self.onread;
-            transport.resume(key, 0);
+            transport.resume(self.sessionKey, 0, 0);
             self.onopen();
         }
         transport.handshake();
@@ -92,18 +94,22 @@ var Transport = function(cspId, url) {
             if (p === null)
                 return this.doClose();
             var ackId = p[0];
-            var data = p[1];
+            var encoding = p[1];
+            var data = p[2];
             if (this.lastEventId != null && ackId <= this.lastEventId)
                 continue;
             if (this.lastEventId != null && ackId != this.lastEventId+1)
                 throw new Error("CSP Transport Protocol Error");
             this.lastEventId = ackId;
+            if (encoding == 1) // percent encoding
+                data = unescape(data);
             this.onPacket(data);
         }
     }
-    this.resume = function(sessionKey, lastEventId) {
+    this.resume = function(sessionKey, lastEventId, lastSentId) {
         this.sessionKey = sessionKey;
         this.lastEventId = lastEventId;
+        this.lastSentId = lastSentId;
         this.reconnect();
     }
     this.cbHandshake = function(data) {
@@ -112,11 +118,15 @@ var Transport = function(cspId, url) {
     }
     this.cbSend = function(data) {
         console.log("SEND STATUS:", data);
+        this.lastSentId += 1;
     }
     this.cbComet = function(data) {
         console.log("RECEIVED:", data);
         this.processPackets(data);
         this.reconnect();
+    }
+    this.toPayload = function(data) {
+        return uneval([[this.lastSentId, 1, escape(data)]]); // XXX: firefox only!
     }
 }
 
@@ -125,10 +135,7 @@ var transports = {};
 transports.xhr = function(cspId, url, params) {
     var self = this;
     Transport.call(self, cspId, url);
-    if (params.du == "0")
-        var interval = csp.vars.poll_interval;
-    else
-        var interval = 0;
+    var interval = params.du == "0" && csp.vars.poll_interval || 0;
 
     var createXHR = function() {
         try { return new XMLHttpRequest(); } catch(e) {}
@@ -140,8 +147,8 @@ transports.xhr = function(cspId, url, params) {
     }
     var xhr = {
         'handshake': createXHR(),
-        'send': createXHR(),
-        'comet': createXHR()
+        'send':      createXHR(),
+        'comet':     createXHR()
     };
 
     var doXHR = function(type, cb, data) {
@@ -153,7 +160,11 @@ transports.xhr = function(cspId, url, params) {
         xhr[type].open('POST', self.url + "/" + type, true);
         xhr[type].onreadystatechange = function() {
             if (xhr[type].readyState == 4) {
-                cb.apply(self, [eval(xhr[type].responseText)]);
+                var data = eval(xhr[type].responseText);
+                if (data)
+                    cb.apply(self, [data]);
+                else
+                    self.reconnect();
             }
         }
         xhr[type].send(data);
@@ -166,7 +177,7 @@ transports.xhr = function(cspId, url, params) {
         doXHR("handshake", self.cbHandshake, qs);
     }
     self.send = function(data) {
-        doXHR("send", self.cbSend, "s=" + self.sessionKey + "&d=" + data);
+        doXHR("send", self.cbSend, "s=" + self.sessionKey + "&d=" + self.toPayload(data));
     }
     self.reconnect = function() {
         window.setTimeout(function() {
@@ -191,10 +202,11 @@ transports.jsonp = function(cspId, url) {
         i.style.visibility = 'hidden';
         return i;
     }
-    var ifr = {};
-    ifr.bar = createIframe();
-    ifr.send = createIframe();
-    ifr.comet = createIframe();
+    var ifr = {
+        'bar':   createIframe(),
+        'send':  createIframe(),
+        'comet': createIframe()
+    };
 
     var killLoadingBar = function() {
         window.setTimeout(function() {
@@ -215,7 +227,7 @@ transports.jsonp = function(cspId, url) {
         }, 0);
     }
     self.send = function(data) {
-        doJSONP("send", "/send?s=" + self.sessionKey + "&rs=;&rp=parent.csp._cb.i" + self.cspId + ".send&d=" + data);
+        doJSONP("send", "/send?s=" + self.sessionKey + "&rs=;&rp=parent.csp._cb.i" + self.cspId + ".send&d=" + self.toPayload(data));
     }
     self.reconnect = function() {
         window.setTimeout(function() {

@@ -1,3 +1,4 @@
+import urllib
 from twisted.web import server
 from twisted.internet import reactor
 from util import json, compress
@@ -14,6 +15,7 @@ class CSPSession(object):
         self.prebuffer = ""
         self.buffer = []
         self.sendId = 0
+        self.lastReceived = -1
         self.durationTimer = None
         self.intervalTimer = None
         self.killTimer = None
@@ -155,10 +157,21 @@ class CSPSession(object):
 
     def write(self, data):
         self.sendId += 1
-        self.buffer.append([self.sendId, data])
+        """
+        SPEC NOTE:
+            compliant servers/clients are required to
+            support the following encodings:
+                0: plain
+                1: percent-encoded
+        """
+        if data is None: # TODO: only encode non-ascii data
+            frame = [self.sendId, 0, data]
+        else:
+            frame = [self.sendId, 1, urllib.quote(data)]
+        self.buffer.append(frame)
         if self.request:
             if self.permVars["is"]:
-                self.sendPackets([[self.sendId, data]])
+                self.sendPackets([frame])
             else:
                 self.sendPackets(finish=True)
                 self.resetDurationTimer()
@@ -176,9 +189,16 @@ class CSPSession(object):
     def getPeer(self):
         return self.peer
 
-    def read(self, data):
-        # TODO: parse packets, throw out duplicates, forward to protocol
-        self.protocol.dataReceived(data)
+    def read(self, rawdata):
+        # parse packets, throw out duplicates, forward to protocol
+        packets = json.loads(rawdata)
+        for key, encoding, data in packets:
+            if self.lastReceived >= key:
+                continue
+            self.lastReceived = key
+            if encoding == 1:
+                data = urllib.unquote(data)
+            self.protocol.dataReceived(data)
 
     def sendPackets(self, packets=None, finish=False):
         self.resetIntervalTimer()
