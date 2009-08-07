@@ -19,10 +19,11 @@ class CSPRootResource(resource.Resource):
         self.connectCb = cb
 
     def connectCb(self, session):
-        print 'CSPRootResource.setConnectCb not called. session "%s" connected'%(session,)
+        pass
+#        print 'CSPRootResource.setConnectCb not called. session "%s" connected'%(session,)
 
     def disconnectCb(self, session):
-        print 'destroying session',session.key
+#        print 'destroying session',session.key
         del self.sessions[session.key]
 
 class CSPLogicResource(resource.Resource):

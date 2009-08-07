@@ -5,6 +5,9 @@ from util import json, compress
 
 class CSPSession(object):
     # SPEC NOTE: added killTimeout (defaults to 10 seconds)
+    #           
+    #            XXX: what SPEC change does this indicate? -mcarter 7/31/09
+
     def __init__(self, key, request, destroySessionCb, killTimeout):
         self.peer = request.client
         self.host = request.host
@@ -32,12 +35,11 @@ class CSPSession(object):
             "bs":"",
             "g":False,
             "se":False,
-            "ct":"text/html" # SPEC NOTE: changed this default from text/plain
+            "ct":"text/html"
         }
         self.updateVars(request)
 
     def updateVars(self, request):
-        # SPEC NOTE: ignore any permanent variable that can't be parsed
         for key in self.permVars:
             if key in request.args:
                 newVal = request.args.get(key)[0]
@@ -45,7 +47,6 @@ class CSPSession(object):
                 try:
                     typedVal = varType(newVal)
                     if key == "g" and self.request and self.permVars["g"] != typedVal:
-                        # SPEC NOTE: end request that changes encoding mid-stream
                         self.endStream()
                     self.permVars[key] = typedVal
                     if key == "ps":
@@ -93,7 +94,12 @@ class CSPSession(object):
     def durationCb(self):
         self.durationTimer = None
         self.resetKillTimer(self.close)
-        self.endStream()
+        
+#        self.endStream()
+        
+        self.sendPackets([], True)
+        self.resetIntervalTimer()
+        self.resetDurationTimer()
 
     def intervalCb(self):
         self.intervalTimer = None
@@ -129,7 +135,7 @@ class CSPSession(object):
         request.setHeader("Cache-Control", "no-cache, must revalidate")
 
         # polling
-        if self.permVars['du'] == 0: # SPEC NOTE: du=0 overrides is=1
+        if self.permVars['du'] == 0:
             return self.returnNow()
 
         # streaming/long-polling, no immediate response
@@ -147,23 +153,17 @@ class CSPSession(object):
         # long-polling
         else:
             return self.returnNow()
+        
 
     def close(self):
         if not self.isClosed:
-            self.write(None) # SPEC NOTE: close packet is now data packet with data=None
+            self.write(None) 
             self.protocol.connectionLost()
             self.isClosed = True
             self.resetKillTimer(self.teardown)
 
     def write(self, data):
         self.sendId += 1
-        """
-        SPEC NOTE:
-            compliant servers/clients are required to
-            support the following encodings:
-                0: plain
-                1: percent-encoded
-        """
         if data is None: # TODO: only encode non-ascii data
             frame = [self.sendId, 0, data]
         else:
@@ -180,9 +180,9 @@ class CSPSession(object):
         for datum in data:
             self.write(datum)
 
-    def loseConnection(self):
+    def loseConnection(self):        
         self.close()
-
+    
     def getHost(self):
         return self.host
 
@@ -222,6 +222,5 @@ class CSPSession(object):
         return "%s(%s)%s%s"%(self.permVars["bp"], json.dumps(packets), self.permVars["bs"], sseid)
     
     def renderRequest(self, data, request):
-        # SPEC NOTE: Content-type is set for _all_ requests (not just comet requests)
         request.setHeader('Content-type', self.permVars['ct'])
         return self.tryCompress("%s(%s)%s"%(self.permVars["rp"], json.dumps(data), self.permVars["rs"]), request)

@@ -1,4 +1,53 @@
 ;(function() {
+socket = {}
+
+socket.readyState = {
+    'initial': 0,
+    'opening': 1,
+    'open':    2,
+    'closing': 3,
+    'closed':  4
+}
+
+socket.settings = {
+    hostname: 'localhost',
+    port: 8000
+}
+socket.util = {};
+
+// Add useful url parsing library to socket.util
+(function() {
+// parseUri 1.2.2
+// (c) Steven Levithan <stevenlevithan.com>
+// MIT License
+function parseUri (str) {
+    var o   = parseUri.options,
+        m   = o.parser[o.strictMode ? "strict" : "loose"].exec(str),
+        uri = {},
+        i   = 14;
+    while (i--) uri[o.key[i]] = m[i] || "";
+    uri[o.q.name] = {};
+    uri[o.key[12]].replace(o.q.parser, function ($0, $1, $2) {
+        if ($1) uri[o.q.name][$1] = $2;
+    });
+    return uri;
+};
+parseUri.options = {
+    strictMode: false,
+    key: ["source","protocol","authority","userInfo","user","password","host","port","relative","path","directory","file","query","anchor"],
+    q:   {
+        name:   "queryKey",
+        parser: /(?:^|&)([^&=]*)=?([^&]*)/g
+    },
+    parser: {
+        strict: /^(?:([^:\/?#]+):)?(?:\/\/((?:(([^:@]*)(?::([^:@]*))?)?@)?([^:\/?#]*)(?::(\d*))?))?((((?:[^?#\/]*\/)*)([^?#]*))(?:\?([^#]*))?(?:#(.*))?)/,
+        loose:  /^(?:(?![^:@]+:[^:@\/]*@)([^:\/?#.]+):)?(?:\/\/)?((?:(([^:@]*)(?::([^:@]*))?)?@)?([^:\/?#]*)(?::(\d*))?)(((\/(?:[^?#](?![^?#\/]*\.[^?#\/.]+(?:[?#]|$)))*\/?)?([^?#\/]*))(?:\?([^#]*))?(?:#(.*))?)/
+    }
+};
+socket.util.parseUri = parseUri;
+})();
+
+
 
 var multiplexer = null;
 var id = 0;
@@ -17,7 +66,7 @@ var Multiplexer = function() {
             var len = parseInt(self.buffer.slice(0, i));
             if (self.buffer.length < (len + i + 1))
                 return;
-            var frame = eval(self.buffer.slice(i + 1, len + i + 1));
+            var frame = csp.JSON.parse(self.buffer.slice(i + 1, len + i + 1));
             self.buffer = self.buffer.slice(len + i + i);
             var socketId = frame[0];
             self.sockets[socketId].onpacket(frame.slice(1));
@@ -52,20 +101,13 @@ var Multiplexer = function() {
             self.write([socket.id, frames.OPEN, socket.addr, socket.port]);
     }
     self.write = function(frame) {
-        var output = uneval(frame); // XXX: won't work in opera...
+        var output = csp.JSON.stringify(frame); // XXX: won't work in opera...
         output = output.length + ',' + output;
         self.csp.write(output);
     }
 }
 
-socket = {}
-socket.readyState = {
-    'initial': 0,
-    'opening': 1,
-    'open':    2,
-    'closing': 3,
-    'closed':  4
-}
+
 
 socket.TCPSocket = function() {
     var self = this;
@@ -112,6 +154,7 @@ socket.TCPSocket = function() {
                         self.onclose(frame[1]);
                         break;
                     case frames.DATA:
+                        console.log('read', frame[1]);
                         self.onread(frame[1]);
                         break;
                 }
@@ -122,7 +165,27 @@ socket.TCPSocket = function() {
         if (self.readyState != socket.readyState.open)
             throw new Error("TCPSocket: invalid readystate!");
         multiplexer.write([self.id, frames.DATA, data]);
+        console.log('send', data);
     }
-}
+};
+
+
+// Try to auto detect the socket port and hostname
+(function() {
+    try {
+        var scripts = document.getElementsByTagName('script');
+        for (var i = 0, script; script = scripts[i]; ++i) {
+            if (script.src.match('socket\.js$')) {
+                var uri = socket.util.parseUri(script.src);
+                socket.settings.hostname = uri.hostname || document.domain || 'localhost';
+                socket.settings.port = uri.port || location.port || (document.domain && 80) || 8000;
+                break;
+            }
+        }
+    } catch(e) {
+    }
+})();
+
+
 
 })();

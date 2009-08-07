@@ -39,11 +39,11 @@ class Incoming(protocol.Protocol):
 
     def write(self, rawdata):
         data = json.dumps(rawdata)
-        print "write:",data
+#        print "write:",data
         self.transport.write("%s,%s"%(len(data), data))
 
     def connectionLost(self):
-        print "connectionLost"
+#        print "connectionLost"
         self.active = False
         self.buffer = ""
         for key in self.buffers.keys():
@@ -74,14 +74,17 @@ class Incoming(protocol.Protocol):
         del self.buffers[key]
 
     def processFrame(self, socketId, frameType, *data):
+#        print 'processFrame', data
         if frameType == FRAME_CLOSE:
             return self.closeStream(socketId, 'UserConnectionReset')
-        if frameType != FRAME_DATA:
-            return self.closeStream(socketId, 'ProtocolError')
-        self.sockets[socketId].transport.write(str(data[0]))
-
+        if frameType == FRAME_DATA:        
+#            print 'read', data[0]
+            return self.sockets[socketId].transport.write(str(data[0]))
+            
+        return self.closeStream(socketId, 'ProtocolError')
+        
     def dataReceived(self, rawdata=""):
-        print 'dataReceived:',rawdata
+#        print 'dataReceived:',rawdata
         # extract first frame
         self.buffer += rawdata
         comma = self.buffer.find(',')
@@ -104,6 +107,7 @@ class Incoming(protocol.Protocol):
         # extract basic frame info
         if len(frame) < 3:
             return self.fatalError("illegal frame")
+#        print 'we got frame', frame
         socketId, frameType, data = frame[0], frame[1], frame[2:]
 
         # established stream
