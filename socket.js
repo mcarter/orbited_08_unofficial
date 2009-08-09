@@ -169,7 +169,7 @@ socket.TCPSocket = function(CometSession) {
                         self.onclose(frame[1]);
                         break;
                     case frames.DATA:
-                        console.log('read', frame[1]);
+//                        console.log('read', frame[1]);
                         self.onread(frame[1]);
                         break;
                 }
@@ -180,7 +180,7 @@ socket.TCPSocket = function(CometSession) {
         if (self.readyState != socket.readyState.open)
             throw new Error("TCPSocket: invalid readystate!");
         multiplexer.write([self.id, frames.DATA, data]);
-        console.log('send', data);
+//        console.log('send', data);
     }
 };
 

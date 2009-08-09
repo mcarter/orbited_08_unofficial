@@ -39,15 +39,15 @@ csp.CometSession = function() {
     self.write = function() { throw new Error("invalid readyState"); }
 
     self.onopen = function() {
-        console.log('onopen', self.sessionKey);
+//        console.log('onopen', self.sessionKey);
     }
 
     self.onclose = function(code) {
-        console.log('onclose', code);
+//        console.log('onclose', code);
     }
 
     self.onread = function(data) {
-        console.log('onread', data);
+//        console.log('onread', data);
     }
 
     self.connect = function(url, timeout) {
@@ -89,6 +89,9 @@ var Transport = function(cspId, url) {
     self.sending = false;
     self.sessionKey = null;
     self.lastEventId = null;
+    var handshakeTimer = null;
+    var sendTimer = null;
+    var cometTimer = null;
     self.processPackets = function(packets) {
         for (var i = 0; i < packets.length; i++) {
             var p = packets[i];
@@ -125,7 +128,10 @@ var Transport = function(cspId, url) {
         self.stop();
     }
     self.stop = function() {
-        throw new Error("Not Implemented");
+        clearTimeout(cometTimer);
+        clearTimeout(sendTimer);
+        clearTimeout(handshakeTimer);
+        self.doStop();
     }
     var cometBackoff = 50; // msg
     var backoff = 50;
@@ -134,7 +140,7 @@ var Transport = function(cspId, url) {
         backoff = 50;
     }
     self.handshakeErr = function() {
-        setTimeout(self.handshake, backoff);
+        cometTimer = setTimeout(self.handshake, backoff);
         backoff *= 2;
     }
     self.sendCb = function() {
@@ -145,7 +151,7 @@ var Transport = function(cspId, url) {
         backoff = 50;
     }
     self.sendErr = function() {
-        setTimeout(self.doSend, backoff);
+        sendTimer = setTimeout(self.doSend, backoff);
         backoff *= 50;
     }
     self.cometCb = function(data) {
@@ -153,7 +159,7 @@ var Transport = function(cspId, url) {
         self.reconnect();
     }
     self.cometErr = function() {
-        setTimeout(self.reconnect, cometBackoff);
+        cometTimer = setTimeout(self.reconnect, cometBackoff);
         cometBackoff *= 2;
     }
 }
@@ -323,8 +329,7 @@ transports.jsonp = function(cspId, url) {
         var args = { s: self.sessionKey, a: self.lastEventId }
         makeRequest("comet", "/comet", args, self.cometCb, self.cometErr, 40);
     }
-    self.stop = function() {
-        console.log('STOP');
+    self.doStop = function() {
     }
     this.toPayload = function(data) {
         var payload = escape(JSON.stringify([[++self.lastSentId, 0, data]])); // XXX: firefox only!
