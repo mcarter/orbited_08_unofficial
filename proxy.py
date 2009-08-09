@@ -56,7 +56,10 @@ class Incoming(protocol.Protocol):
         print "fatal error:",msg
         self.transport.loseConnection()
 
-    def closeStream(self, socketId, code):
+    def closeStream(self, socketId, code, *args):
+        if args:
+            print self, socketId, code, args
+            raise Exception("BAD");
         if self.active:
             if socketId in self.sockets:
                 self.sockets[socketId].transport.loseConnection()
@@ -127,7 +130,7 @@ class Incoming(protocol.Protocol):
             if False: # XXX: here, make sure this connection is allowed
                 return self.closeStream(socketId, 'Unauthorized')
             out = protocol.ClientCreator(reactor, Outgoing, self, socketId)
-            out.connectTCP(host, port).addErrback(self.closeStream, socketId, 'RemoteConnectionFailed')
+            out.connectTCP(host, port).addErrback(lambda x: self.closeStream(socketId,'RemoteConnectionFailed'))
             self.buffers[socketId] = []
 
         # repeat
