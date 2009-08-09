@@ -287,6 +287,9 @@ transports.jsonp = function(cspId, url) {
                 if (self.opened) {
                     cb.apply(null, arguments);
                 }
+                else {
+                    console.log('suppressing callback', rType, url, args, cb, eb, timeout);
+                }
             }
             var jsonpId = setJsonpCallbacks(callback, errback);
     
