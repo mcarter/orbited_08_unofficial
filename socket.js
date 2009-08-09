@@ -57,7 +57,7 @@ var frames = {
     'DATA':  2
 }
 
-var Multiplexer = function() {
+var Multiplexer = function(CometSession) {
     if (multiplexer != null)
         throw new Error("Multiplexer is a singleton");
     var parseFrames = function() {
@@ -66,7 +66,7 @@ var Multiplexer = function() {
             var len = parseInt(self.buffer.slice(0, i));
             if (self.buffer.length < (len + i + 1))
                 return;
-            var frame = csp.JSON.parse(self.buffer.slice(i + 1, len + i + 1));
+            var frame = CometSession.prototype.JSON.parse(self.buffer.slice(i + 1, len + i + 1));
             self.buffer = self.buffer.slice(len + i + i);
             var socketId = frame[0];
             self.sockets[socketId].onpacket(frame.slice(1));
@@ -74,10 +74,11 @@ var Multiplexer = function() {
         }
     }
     self = multiplexer = this;
+    socket.TCPSocket.prototype.JSON = CometSession.prototype.JSON;
     self.buffer = "";
     self.sockets = {};
-    self.csp = new csp.CometSession();
-    self.csp.connect("http://localhost:8050");// XXX: detect properly
+    self.csp = new CometSession();
+    self.csp.connect("http://" + socket.settings.hostname + ":" + socket.settings.port);// XXX: detect properly
     self.csp.onopen = function() {
         for (id in self.sockets)
             self.sockets[id].onopen();
@@ -101,7 +102,7 @@ var Multiplexer = function() {
             self.write([socket.id, frames.OPEN, socket.addr, socket.port]);
     }
     self.write = function(frame) {
-        var output = csp.JSON.stringify(frame); // XXX: won't work in opera...
+        var output = CometSession.prototype.JSON.stringify(frame); // XXX: won't work in opera...
         output = output.length + ',' + output;
         self.csp.write(output);
     }
@@ -109,8 +110,19 @@ var Multiplexer = function() {
 
 
 
-socket.TCPSocket = function() {
+socket.TCPSocket = function(CometSession) {    
     var self = this;
+    if (!CometSession) {
+        if (typeof(csp) != 'undefined' && csp.CometSession) {
+            CometSession = csp.CometSession;
+        }
+        else if (window.csp && window.csp.CometSession) {
+            CometSession = window.csp.CometSession;
+        }
+        else {
+            throw new Error("Invalid CometSession implementation");
+        }
+    }
     self.id = ++id;
     self.readyState = socket.readyState.initial;
     self.addr = null;
@@ -129,9 +141,12 @@ socket.TCPSocket = function() {
         self.addr = addr;
         self.port = port;
         self.binary = !!isBinary;
+        if (typeof(addr) != 'string' || addr.length == 0) {
+            throw new Error('Invalid address: "' + addr + '"');
+        }
         self.readyState = socket.readyState.opening;
         if (multiplexer == null)
-            new Multiplexer();
+            new Multiplexer(CometSession);
         multiplexer.register(self,
             function() { // onopen
                 multiplexer.write([self.id, frames.OPEN, self.addr, self.port]);
@@ -168,7 +183,6 @@ socket.TCPSocket = function() {
         console.log('send', data);
     }
 };
-
 
 // Try to auto detect the socket port and hostname
 (function() {
