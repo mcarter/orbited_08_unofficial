@@ -41,9 +41,12 @@ class Incoming(protocol.Protocol):
         data = json.dumps(rawdata)
 #        print "write:",data
         self.transport.write("%s,%s"%(len(data), data))
+    
+    def connectionMade(self):
+        print 'connectionMade'
 
     def connectionLost(self):
-#        print "connectionLost"
+        print "connectionLost"
         self.active = False
         self.buffer = ""
         for key in self.buffers.keys():
