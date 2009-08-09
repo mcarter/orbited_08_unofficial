@@ -61,14 +61,14 @@ csp.CometSession = function() {
 
         var handshakeTimer = window.setTimeout(self.close, timeout);
         transport.onHandshake = function(data) {
-            console.log('csp onHandshake', data);
+//            console.log('csp onHandshake', data);
             self.readyState = csp.readyState.open;
             self.sessionKey = data.session;
             self.write = transport.send;
             transport.onPacket = self.onread;
             transport.resume(self.sessionKey, 0, 0);
             clearTimeout(handshakeTimer);
-            console.log('csp onopen');
+//            console.log('csp onopen');
             self.onopen();
         }
         transport.handshake();
@@ -267,7 +267,7 @@ transports.jsonp = function(cspId, url) {
         }, 0);
     }
     var makeRequest = function(rType, url, args, cb, eb, timeout) {
-        console.log('makeRequest', rType, url, args, cb, eb, timeout);
+//        console.log('makeRequest', rType, url, args, cb, eb, timeout);
 
         window.setTimeout(function() {
             var doc = ifr[rType].contentDocument;
@@ -288,7 +288,7 @@ transports.jsonp = function(cspId, url) {
                     cb.apply(null, arguments);
                 }
                 else {
-                    console.log('suppressing callback', rType, url, args, cb, eb, timeout);
+//                    console.log('suppressing callback', rType, url, args, cb, eb, timeout);
                 }
             }
             var jsonpId = setJsonpCallbacks(callback, errback);
