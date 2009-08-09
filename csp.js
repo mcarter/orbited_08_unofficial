@@ -74,6 +74,8 @@ csp.CometSession = function() {
 
     self.close = function() {
         transport.close();
+        self.readyState = csp.readyState.closed;
+        self.onclose();
     }
 }
 
@@ -195,7 +197,6 @@ transports.xhr = function(cspId, url, params) {
         }
         xhr[type].send(data);
     }
-
     self.handshake = function() {
         var qs = "";
         for (param in params)
@@ -351,6 +352,7 @@ transports.jsonp = function(cspId, url) {
 
 var JSON = {};
 csp.JSON = JSON;
+csp.CometSession.prototype.JSON = JSON;
 (function () {
 
     function f(n) {
