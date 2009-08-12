@@ -36,14 +36,42 @@ class Incoming(protocol.Protocol):
         self.buffers = {}
         self.sockets = {}
         self.active = True
-
+        print 'connectionMade'
+        
     def write(self, rawdata):
+        # XXX: The next line of code can cause an error, like this:
+        #       -mcarter 11/8/09
+        """
+Traceback (most recent call last):
+  File "/usr/lib/python2.5/site-packages/Twisted-8.2.0-py2.5-linux-x86_64.egg/twisted/python/log.py", line 84, in callWithLogger
+    return callWithContext({"system": lp}, func, *args, **kw)
+  File "/usr/lib/python2.5/site-packages/Twisted-8.2.0-py2.5-linux-x86_64.egg/twisted/python/log.py", line 69, in callWithContext
+    return context.call({ILogContext: newCtx}, func, *args, **kw)
+  File "/usr/lib/python2.5/site-packages/Twisted-8.2.0-py2.5-linux-x86_64.egg/twisted/python/context.py", line 59, in callWithContext
+    return self.currentContext().callWithContext(ctx, func, *args, **kw)
+  File "/usr/lib/python2.5/site-packages/Twisted-8.2.0-py2.5-linux-x86_64.egg/twisted/python/context.py", line 37, in callWithContext
+    return func(*args,**kw)
+--- <exception caught here> ---
+  File "/usr/lib/python2.5/site-packages/Twisted-8.2.0-py2.5-linux-x86_64.egg/twisted/internet/selectreactor.py", line 146, in _doReadOrWrite
+    why = getattr(selectable, method)()
+  File "/usr/lib/python2.5/site-packages/Twisted-8.2.0-py2.5-linux-x86_64.egg/twisted/internet/tcp.py", line 463, in doRead
+    return self.protocol.dataReceived(data)
+  File "proxy.py", line 28, in dataReceived
+    self.incoming.write([self.socketId, FRAME_DATA, data])
+  File "proxy.py", line 42, in write
+    data = json.dumps(rawdata)
+  File "build/bdist.linux-x86_64/egg/simplejson/__init__.py", line 230, in dumps
+    
+  File "build/bdist.linux-x86_64/egg/simplejson/encoder.py", line 200, in encode
+    
+  File "build/bdist.linux-x86_64/egg/simplejson/encoder.py", line 260, in iterencode
+    
+exceptions.UnicodeDecodeError: 'utf8' codec can't decode bytes in position 448-450: invalid data
+            
+        """
         data = json.dumps(rawdata)
 #        print "write:",data
         self.transport.write("%s,%s"%(len(data), data))
-    
-    def connectionMade(self):
-        print 'connectionMade'
 
     def connectionLost(self):
         print "connectionLost"

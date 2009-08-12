@@ -32,6 +32,7 @@ class CSPLogicResource(resource.Resource):
         self.root = root
 
     def render(self, request):
+        print 'request', request.path, request.args
         if request.method.lower() == 'post':
             request.args = cgi.parse_qs(request.content.read())
         path = request.path.rsplit('/',1)[1]

@@ -191,6 +191,7 @@ class CSPSession(object):
 
     def read(self, rawdata):
         # parse packets, throw out duplicates, forward to protocol
+        print 'parse', repr(rawdata)
         packets = json.loads(rawdata)
         for key, encoding, data in packets:
             if self.lastReceived >= key:
@@ -216,11 +217,16 @@ class CSPSession(object):
     def renderPackets(self, packets=None):
         if packets is None:
             packets = self.buffer
-        sseid = "\r\n"
+        if self.permVars['se']:
+            sseid = "\r\n"
+        else:
+            sseid = ""
         if self.permVars["se"] and packets:
             sseid = "id: %s\r\n\r\n"%(packets[-1][0],)
         return "%s(%s)%s%s"%(self.permVars["bp"], json.dumps(packets), self.permVars["bs"], sseid)
     
     def renderRequest(self, data, request):
         request.setHeader('Content-type', self.permVars['ct'])
-        return self.tryCompress("%s(%s)%s"%(self.permVars["rp"], json.dumps(data), self.permVars["rs"]), request)
+        x = self.tryCompress("%s(%s)%s"%(self.permVars["rp"], json.dumps(data), self.permVars["rs"]), request)
+        print x
+        return x

@@ -13,39 +13,8 @@ socket.settings = {
     hostname: 'localhost',
     port: 8000
 }
-socket.util = {};
 
-// Add useful url parsing library to socket.util
-(function() {
-// parseUri 1.2.2
-// (c) Steven Levithan <stevenlevithan.com>
-// MIT License
-function parseUri (str) {
-    var o   = parseUri.options,
-        m   = o.parser[o.strictMode ? "strict" : "loose"].exec(str),
-        uri = {},
-        i   = 14;
-    while (i--) uri[o.key[i]] = m[i] || "";
-    uri[o.q.name] = {};
-    uri[o.key[12]].replace(o.q.parser, function ($0, $1, $2) {
-        if ($1) uri[o.q.name][$1] = $2;
-    });
-    return uri;
-};
-parseUri.options = {
-    strictMode: false,
-    key: ["source","protocol","authority","userInfo","user","password","host","port","relative","path","directory","file","query","anchor"],
-    q:   {
-        name:   "queryKey",
-        parser: /(?:^|&)([^&=]*)=?([^&]*)/g
-    },
-    parser: {
-        strict: /^(?:([^:\/?#]+):)?(?:\/\/((?:(([^:@]*)(?::([^:@]*))?)?@)?([^:\/?#]*)(?::(\d*))?))?((((?:[^?#\/]*\/)*)([^?#]*))(?:\?([^#]*))?(?:#(.*))?)/,
-        loose:  /^(?:(?![^:@]+:[^:@\/]*@)([^:\/?#.]+):)?(?:\/\/)?((?:(([^:@]*)(?::([^:@]*))?)?@)?([^:\/?#]*)(?::(\d*))?)(((\/(?:[^?#](?![^?#\/]*\.[^?#\/.]+(?:[?#]|$)))*\/?)?([^?#\/]*))(?:\?([^#]*))?(?:#(.*))?)/
-    }
-};
-socket.util.parseUri = parseUri;
-})();
+
 
 
 
@@ -73,7 +42,7 @@ var Multiplexer = function(CometSession) {
             i = self.buffer.indexOf(',');
         }
     }
-    self = multiplexer = this;
+    var self = multiplexer = this;
     socket.TCPSocket.prototype.JSON = CometSession.prototype.JSON;
     self.buffer = "";
     self.sockets = {};
@@ -190,7 +159,7 @@ socket.TCPSocket = function(CometSession) {
         var scripts = document.getElementsByTagName('script');
         for (var i = 0, script; script = scripts[i]; ++i) {
             if (script.src.match('socket\.js$')) {
-                var uri = socket.util.parseUri(script.src);
+                var uri = csp.util.parseUri(script.src);
                 socket.settings.hostname = uri.hostname || document.domain || 'localhost';
                 socket.settings.port = uri.port || location.port || (document.domain && 80) || 8000;
                 break;

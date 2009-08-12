@@ -14,11 +14,63 @@ csp = {
         'closed':  4
     }
 };
+csp.util = {};
 
-
-csp.vars = {
-    'poll_interval': 2000 // XXX: make this legit...
+// Add useful url parsing library to socket.util
+(function() {
+// parseUri 1.2.2
+// (c) Steven Levithan <stevenlevithan.com>
+// MIT License
+function parseUri (str) {
+    var o   = parseUri.options,
+        m   = o.parser[o.strictMode ? "strict" : "loose"].exec(str),
+        uri = {},
+        i   = 14;
+    while (i--) uri[o.key[i]] = m[i] || "";
+    uri[o.q.name] = {};
+    uri[o.key[12]].replace(o.q.parser, function ($0, $1, $2) {
+        if ($1) uri[o.q.name][$1] = $2;
+    });
+    return uri;
 };
+parseUri.options = {
+    strictMode: false,
+    key: ["source","protocol","authority","userInfo","user","password","host","port","relative","path","directory","file","query","anchor"],
+    q:   {
+        name:   "queryKey",
+        parser: /(?:^|&)([^&=]*)=?([^&]*)/g
+    },
+    parser: {
+        strict: /^(?:([^:\/?#]+):)?(?:\/\/((?:(([^:@]*)(?::([^:@]*))?)?@)?([^:\/?#]*)(?::(\d*))?))?((((?:[^?#\/]*\/)*)([^?#]*))(?:\?([^#]*))?(?:#(.*))?)/,
+        loose:  /^(?:(?![^:@]+:[^:@\/]*@)([^:\/?#.]+):)?(?:\/\/)?((?:(([^:@]*)(?::([^:@]*))?)?@)?([^:\/?#]*)(?::(\d*))?)(((\/(?:[^?#](?![^?#\/]*\.[^?#\/.]+(?:[?#]|$)))*\/?)?([^?#\/]*))(?:\?([^#]*))?(?:#(.*))?)/
+    }
+};
+csp.util.parseUri = parseUri;
+})();
+
+csp.util.isSameDomain = function(urlA, urlB) {
+    var a = csp.util.parseUri(urlA);
+    var b = csp.util.parseUri(urlB);
+    return ((urlA.port == urlB.port ) && (urlA.host == urlB.host) && (urlA.protocol = urlB.protocol))
+}
+
+csp.util.chooseTransport = function(url, options) {
+    console.log('choosing');
+    if (csp.util.isSameDomain(url, location.toString())) {
+        console.log('same domain, xhr');
+        return transports.xhr;
+    }
+    console.log('not xhr');
+    try {
+        if (window.XMLHttpRequest && (new XMLHttpRequest()).withCredentials !== undefined) {
+            console.log('xhr')
+            return transports.xhr;
+        }
+    } catch(e) { }
+    console.log('jsonp');
+    return transports.jsonp
+}
+
 
 var PARAMS = {
     'xhrstream':   {"is": "1", "bs": "\n"},
@@ -35,9 +87,7 @@ csp.CometSession = function() {
     self.readyState = csp.readyState.initial;
     self.sessionKey = null;
     var transport = null;
-
     self.write = function() { throw new Error("invalid readyState"); }
-
     self.onopen = function() {
 //        console.log('onopen', self.sessionKey);
     }
@@ -49,31 +99,25 @@ csp.CometSession = function() {
     self.onread = function(data) {
 //        console.log('onread', data);
     }
-
-    self.connect = function(url, timeout) {
-        timeout = (timeout || 10000);
+    self.connect = function(url, options) {
+        options = options || {};
+        var timeout = options.timeout || 10000;
         self.readyState = csp.readyState.opening;
         self.url = url;
-
-
-        transport = new transports.jsonp(self.id, url);
-//        transport = new transports.xhr(self.id, url, PARAMS.xhrlongpoll);
-
+        console.log('c url', url);
+        transport = new (csp.util.chooseTransport(url, options))(self.id, url, options);
         var handshakeTimer = window.setTimeout(self.close, timeout);
         transport.onHandshake = function(data) {
-//            console.log('csp onHandshake', data);
             self.readyState = csp.readyState.open;
             self.sessionKey = data.session;
             self.write = transport.send;
             transport.onPacket = self.onread;
             transport.resume(self.sessionKey, 0, 0);
             clearTimeout(handshakeTimer);
-//            console.log('csp onopen');
             self.onopen();
         }
         transport.handshake();
     }
-
     self.close = function() {
         transport.close();
         self.readyState = csp.readyState.closed;
@@ -82,6 +126,7 @@ csp.CometSession = function() {
 }
 
 var Transport = function(cspId, url) {
+    console.log('url', url);
     var self = this;
     self.opened = false;
     self.cspId = cspId;
@@ -91,9 +136,10 @@ var Transport = function(cspId, url) {
     self.sending = false;
     self.sessionKey = null;
     self.lastEventId = null;
-    var handshakeTimer = null;
-    var sendTimer = null;
-    var cometTimer = null;
+    
+    this.handshake = function() {
+        self.opened = true;
+    }
     self.processPackets = function(packets) {
         for (var i = 0; i < packets.length; i++) {
             var p = packets[i];
@@ -124,103 +170,163 @@ var Transport = function(cspId, url) {
             self.doSend();
         }
     }
-
-    self.close = function() {
-        self.opened = false;
-        self.stop();
+    self.doSend = function() {
+        throw new Error("Not Implemented");
     }
     self.stop = function() {
+        self.opened = false;
         clearTimeout(cometTimer);
         clearTimeout(sendTimer);
         clearTimeout(handshakeTimer);
-        self.doStop();
     }
     var cometBackoff = 50; // msg
     var backoff = 50;
+    var handshakeTimer = null;
+    var sendTimer = null;
+    var cometTimer = null;
     self.handshakeCb = function(data) {
-        self.onHandshake(data);
-        backoff = 50;
+        console.log('handshakeCb!');
+        if (self.opened) {
+            console.log('do onHandshake');
+            self.onHandshake(data);
+            backoff = 50;
+        }
     }
     self.handshakeErr = function() {
-        cometTimer = setTimeout(self.handshake, backoff);
-        backoff *= 2;
+        if (self.opened) {
+//            handshakeTimer = setTimeout(self.handshake, backoff);
+//            backoff *= 2;
+        }
     }
     self.sendCb = function() {
         self.packetsInFlight = null;
-        if (self.buffer) {
-            self.doSend();
-        }
         backoff = 50;
+        if (self.opened) {
+            if (self.buffer) {
+                self.doSend();
+            }
+        }
     }
     self.sendErr = function() {
-        sendTimer = setTimeout(self.doSend, backoff);
-        backoff *= 50;
+        if (self.opened) {
+            sendTimer = setTimeout(self.doSend, backoff);
+            backoff *= 50;
+        }
     }
     self.cometCb = function(data) {
-        self.processPackets(data);
-        self.reconnect();
+        if (self.opened) {
+            self.processPackets(data);
+            self.reconnect();
+        }
     }
     self.cometErr = function() {
-        cometTimer = setTimeout(self.reconnect, cometBackoff);
-        cometBackoff *= 2;
+        if (self.opened) {
+            cometTimer = setTimeout(self.reconnect, cometBackoff);
+            cometBackoff *= 2;
+        }
     }
 }
 
 var transports = {};
 
-transports.xhr = function(cspId, url, params) {
+transports.xhr = function(cspId, url) {
     var self = this;
     Transport.call(self, cspId, url);
-    var interval = params.du == "0" && csp.vars.poll_interval || 0;
-
-    var createXHR = function() {
-        try { return new XMLHttpRequest(); } catch(e) {}
-        try { return new ActiveXObject('MSXML3.XMLHTTP'); } catch(e) {}
-        try { return new ActiveXObject('MSXML2.XMLHTTP.3.0'); } catch(e) {}
-        try { return new ActiveXObject('Msxml2.XMLHTTP'); } catch(e) {}
-        try { return new ActiveXObject('Microsoft.XMLHTTP'); } catch(e) {}
-        throw new Error('Could not find XMLHttpRequest or an alternative.');
-    }
-    var xhr = {
-        'handshake': createXHR(),
-        'send':      createXHR(),
-        'comet':     createXHR()
-    };
-
-    var doXHR = function(type, cb, data) {
-        if (true) { // TODO: something in settings...
-            try {
-                netscape.security.PrivilegeManager.enablePrivilege('UniversalBrowserRead');
-            } catch (ex) {alert(ex) }
+    var makeXhr = function() {
+        if (window.XDomainRequest) {
+            return new XDomainRequest();
         }
-        xhr[type].open('POST', self.url + "/" + type, true);
-        xhr[type].onreadystatechange = function() {
-            if (xhr[type].readyState == 4) {
-                var data = JSON.parse(xhr[type].responseText);
-                if (data)
-                    cb.apply(self, [data]);
-                else
-                    self.reconnect();
+        // TODO: use XDomainRequest where available.
+        return new XMLHttpRequest();
+    }
+    var sendXhr = makeXhr();
+    var cometXhr = makeXhr();
+    if (!csp.util.isSameDomain(url, location.toString())) {
+        if (!window.XDomainRequest)
+        if (sendXhr.withCredentials === undefined) {
+            throw new Error("Invalid cross-domain transport");
+        }
+    }
+
+    var makeRequest = function(type, url, args, cb, eb, timeout) {
+        var xhr;
+        if (type == 'send') { xhr = sendXhr; }
+        if (type == 'comet') { xhr = cometXhr; }
+        xhr.open('POST', self.url + url, true);
+        xhr.setRequestHeader('Content-Type', 'text/plain')
+        var payload = ""
+        for (key in args) {
+            payload += key + '=' + args[key] + '&';
+        }
+        payload = payload.substring(0, payload.length-1)
+        var aborted = false;
+        var timer = null;
+//        console.log('setting on ready state change');
+        xhr.onreadystatechange = function() {
+            if (aborted) { 
+                //console.log('aborted'); 
+                return eb(); 
+            }
+            if (xhr.readyState == 4) {
+                try {
+                    if (xhr.status == 200) {
+                        clearTimeout(timer);
+                        // XXX: maybe the spec shouldn't wrap ALL responses in ( ).
+                        //      -mcarter 8/11/09
+                        var data = xhr.responseText.substring(1, xhr.responseText.length-1)
+//                        console.log('data', xhr.responseText);
+                        cb(JSON.parse(data));
+//                        cb(eval(xhr.responseText));
+                        return;
+                    }
+///                    console.log('status', xhr.status);
+                } catch(e) { 
+                    //console.log('exception', e);
+                }
+//                console.log('ready state 4, no exception, status != 200')
+                try {
+//                    console.log('xhr.responseText', xhr.responseText);
+                } catch(e) { 
+                    //console.log('ex'); 
+                }
+                return eb();
             }
         }
-        xhr[type].send(data);
-    }
-    self.handshake = function() {
-        var qs = "";
-        for (param in params)
-            qs += param + "=" + params[param] + "&";
-        doXHR("handshake", self.cbHandshake, qs);
-    }
-    self.send = function(data) {
-        doXHR("send", self.cbSend, "s=" + self.sessionKey + "&d=" + self.toPayload(data));
-    }
-    self.reconnect = function() {
-        window.setTimeout(function() {
-            doXHR("comet", self.cbComet, "s=" + self.sessionKey + "&a=" + self.lastEventId);
-        }, interval);
+        if (timeout) {
+            timer = setTimeout(function() { aborted = true; xhr.abort(); }, timeout*1000);
+        }
+        console.log('send xhr', payload);
+        xhr.send(payload)
+
     }
 
+    this.handshake = function() {
+        self.opened = true;
+        makeRequest("send", "/handshake", {}, self.handshakeCb, self.handshakeErr, 10);
+    }
+    this.doSend = function() {
+        var args;
+        if (!self.packetsInFlight) {
+            self.packetsInFlight = self.toPayload(self.buffer)
+            self.buffer = "";
+        }
+        args = { s: self.sessionKey, d: self.packetsInFlight };
+        makeRequest("send", "/send", args, self.sendCb, self.sendErr, 10);
+    }
+    this.reconnect = function() {
+        var args = { s: self.sessionKey, a: self.lastEventId }
+        makeRequest("comet", "/comet", args, self.cometCb, self.cometErr, 40);
+    }
+    this.stop = function() {
+        Transport.stop.call(self);
+    }
+    this.toPayload = function(data) {
+        var payload = escape(JSON.stringify([[++self.lastSentId, 0, data]]));
+        return payload
+    }
 }
+
+
 csp._jsonp = {};
 var _jsonpId = 0;
 function setJsonpCallbacks(cb, eb) {
@@ -266,17 +372,24 @@ transports.jsonp = function(cspId, url) {
             document.body.removeChild(ifr.bar);
         }, 0);
     }
+    var rId = 0;
     var makeRequest = function(rType, url, args, cb, eb, timeout) {
 //        console.log('makeRequest', rType, url, args, cb, eb, timeout);
 
         window.setTimeout(function() {
-            var doc = ifr[rType].contentDocument;
+            var temp = ifr[rType];
+            // IE6+ uses contentWindow.document, the others use temp.contentDocument.
+            var doc = temp.contentDocument || temp.contentWindow.document || temp.document;
             var head = doc.getElementsByTagName('head')[0];
             var errorSuppressed = false;
-            function errback() {
-                var scripts = doc.getElementsByTagName('script');
-                var s = doc.getElementsByTagName('script')[0]; s.parentNode.removeChild(s);
-                var s = doc.getElementsByTagName('script')[0]; s.parentNode.removeChild(s);
+            function errback(isIe) {
+                if (!isIe) {
+                    var scripts = doc.getElementsByTagName('script');
+                    var s1 = doc.getElementsByTagName('script')[0]; 
+                    var s2 = doc.getElementsByTagName('script')[1]; 
+                    s1.parentNode.removeChild(s1);
+                    s2.parentNode.removeChild(s2);
+                }
                 removeJsonpCallback(jsonpId);
                 if (!errorSuppressed && self.opened) {
                     eb.apply(null, arguments);
@@ -292,7 +405,6 @@ transports.jsonp = function(cspId, url) {
                 }
             }
             var jsonpId = setJsonpCallbacks(callback, errback);
-    
             url += '?'
             for (key in args) {
                 url += key + '=' + args[key] + '&';
@@ -303,25 +415,39 @@ transports.jsonp = function(cspId, url) {
             else if (rType == "comet") {
                 url += 'bs=;&bp=' + getJsonpCallbackPath(jsonpId);
             }
-    
             var s = doc.createElement("script");
             s.src = self.url + url;
             head.appendChild(s);
-    
-            var s = doc.createElement("script");
-            s.innerHTML = getJsonpErrbackPath(jsonpId) + '();'
-            head.appendChild(s);
-            
-            killLoadingBar();
+
+            if (s.onreadystatechange === null) { // IE
+                // TODO: I suspect that if IE gets half of an HTTP body when
+                //       the connection resets, it will go ahead and execute
+                //       the script tag as if all were well, and then fail
+                //       silently without a loaded event. For this reason
+                //       we should probably also set a timer of DURATION + 10
+                //       or something to catch timeouts eventually.
+                //      -Mcarter 8/11/09
+                s.onreadystatechange = function() {
+                    if (s.readyState == "loaded") {
+                        errback(true);
+                    }
+                }
+            }
+            else {
+                var s = doc.createElement("script");
+                s.innerHTML = getJsonpErrbackPath(jsonpId) + '(false);'
+                head.appendChild(s);
+                killLoadingBar();
+            }
         }, 0);
 
     }
 
-    self.handshake = function() {
+    this.handshake = function() {
         self.opened = true;
         makeRequest("send", "/handshake", {}, self.handshakeCb, self.handshakeErr, 10);
     }
-    self.doSend = function() {
+    this.doSend = function() {
         var args;
         if (!self.packetsInFlight) {
             self.packetsInFlight = self.toPayload(self.buffer)
@@ -330,21 +456,27 @@ transports.jsonp = function(cspId, url) {
         args = { s: self.sessionKey, d: self.packetsInFlight };
         makeRequest("send", "/send", args, self.sendCb, self.sendErr, 10);
     }
-    self.reconnect = function() {
+    this.reconnect = function() {
         var args = { s: self.sessionKey, a: self.lastEventId }
         makeRequest("comet", "/comet", args, self.cometCb, self.cometErr, 40);
     }
-    self.doStop = function() {
+    this.stop = function() {
+        Transport.stop.call(self);
     }
     this.toPayload = function(data) {
         var payload = escape(JSON.stringify([[++self.lastSentId, 0, data]])); // XXX: firefox only!
         return payload
     }
-
     document.body.appendChild(ifr.send);
     document.body.appendChild(ifr.comet);
     killLoadingBar();
 }
+
+
+
+
+
+
 
 // Add csp.JSON 
 /*
