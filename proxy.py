@@ -136,7 +136,7 @@ exceptions.UnicodeDecodeError: 'utf8' codec can't decode bytes in position 448-4
         try:
             frame = json.loads(frame)
             socketId, frameType, data = frame[0], frame[1], frame[2:]
-            assert(data) # XXX question for mario: why does 'data' need to be nonempty?
+            assert data  # XXX question for mario: why does 'data' need to be nonempty?
                          #     couldn't close frames, for instance, have no args?
         except:
             return self.fatalError("cannot parse frame")
