@@ -135,14 +135,11 @@ exceptions.UnicodeDecodeError: 'utf8' codec can't decode bytes in position 448-4
         frame, self.buffer = self.buffer[comma+1:end], self.buffer[end:]
         try:
             frame = json.loads(frame)
+            socketId, frameType, data = frame[0], frame[1], frame[2:]
+            assert(data) # XXX question for mario: why does 'data' need to be nonempty?
+                         #     couldn't close frames, for instance, have no args?
         except:
             return self.fatalError("cannot parse frame")
-
-        # extract basic frame info
-        if len(frame) < 3:
-            return self.fatalError("illegal frame")
-#        print 'we got frame', frame
-        socketId, frameType, data = frame[0], frame[1], frame[2:]
 
         # established stream
         if socketId in self.sockets:
