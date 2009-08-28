@@ -1,5 +1,8 @@
 ;(function() {
-socket = {}
+
+var JSON = CometSession.prototype.JSON;
+
+socket = {};
 
 socket.readyState = {
     'initial': 0,
@@ -7,16 +10,12 @@ socket.readyState = {
     'open':    2,
     'closing': 3,
     'closed':  4
-}
+};
 
 socket.settings = {
     hostname: 'localhost',
     port: 8000
-}
-
-
-
-
+};
 
 var multiplexer = null;
 var id = 0;
@@ -24,26 +23,28 @@ var frames = {
     'OPEN':  0,
     'CLOSE': 1,
     'DATA':  2
-}
+};
 
 var Multiplexer = function(CometSession) {
-    if (multiplexer != null)
-        throw new Error("Multiplexer is a singleton");
+    if (multiplexer != null) {
+        throw new Error("Multiplexer is a singleton");      
+    }
     var parseFrames = function() {
-        var i = self.buffer.indexOf(',');
-        while (i > -1) {
-            var len = parseInt(self.buffer.slice(0, i));
-            if (self.buffer.length < (len + i + 1))
-                return;
-            var frame = CometSession.prototype.JSON.parse(self.buffer.slice(i + 1, len + i + 1));
-            self.buffer = self.buffer.slice(len + i + i);
+        // parse frames grabs out a frame, then parses it as json, and fires
+        // onpacket on the socket of ID indicated in the frame
+        var frameBegin;
+        while ((frameBegin = self.buffer.indexOf('[')) > -1) {
+            var frameEnd = parseInt(self.buffer.slice(0, frameBegin)) + frameBegin;
+            if (self.buffer.length < frameEnd)
+                return;  // frame still incomplete
+            var frame = JSON.parse(self.buffer.slice(frameBegin, frameEnd));
+            self.buffer = self.buffer.slice(frameEnd); // shift packet out of buffer
             var socketId = frame[0];
             self.sockets[socketId].onpacket(frame.slice(1));
-            i = self.buffer.indexOf(',');
-        }
-    }
+        };
+    };
     var self = multiplexer = this;
-    socket.TCPSocket.prototype.JSON = CometSession.prototype.JSON;
+    socket.TCPSocket.prototype.JSON = JSON; // XXX is this really necessary?
     self.buffer = "";
     self.sockets = {};
     self.csp = new CometSession();
@@ -71,8 +72,8 @@ var Multiplexer = function(CometSession) {
             self.write([socket.id, frames.OPEN, socket.addr, socket.port]);
     }
     self.write = function(frame) {
-        var output = CometSession.prototype.JSON.stringify(frame); // XXX: won't work in opera...
-        output = output.length + ',' + output;
+        var output = JSON.stringify(frame); // XXX: won't work in opera...
+        output = output.length + output;
         self.csp.write(output);
     }
 }
@@ -125,6 +126,7 @@ socket.TCPSocket = function(CometSession) {
                 self.onclose(code);
             },
             function(frame) { // onpacket
+                // console.log('GOT ' + ['OPEN', 'CLOSE', 'DATA'][frame[0]] + ' FRAME', uneval(frame[1]))
                 var frameType = frame[0];
                 switch(frameType) {
                     case frames.OPEN:
@@ -138,7 +140,7 @@ socket.TCPSocket = function(CometSession) {
                         self.onclose(frame[1]);
                         break;
                     case frames.DATA:
-//                        console.log('read', frame[1]);
+                        // console.log('read', frame[1]);
                         self.onread(frame[1]);
                         break;
                 }

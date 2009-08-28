@@ -70,8 +70,7 @@ exceptions.UnicodeDecodeError: 'utf8' codec can't decode bytes in position 448-4
             
         """
         data = json.dumps(rawdata)
-#        print "write:",data
-        self.transport.write("%s,%s"%(len(data), data))
+        self.transport.write(str(len(data)) + data)
 
     def connectionLost(self):
         print "connectionLost"
@@ -121,23 +120,20 @@ exceptions.UnicodeDecodeError: 'utf8' codec can't decode bytes in position 448-4
 #        print 'dataReceived:',rawdata
         # extract first frame
         self.buffer += rawdata
-        comma = self.buffer.find(',')
-        if comma == -1:
+        frameBegin = self.buffer.find('[')
+        if frameBegin == -1:
             return # wait for more bytes
-        size = self.buffer[:comma]
         try:
-            size = int(size)
+            size = int(self.buffer[:frameBegin])
         except:
             return self.fatalError("non-integer frame size")
-        end = comma + 1 + size
-        if len(self.buffer) < end:
+        frameEnd = frameBegin + size
+        if len(self.buffer) < frameEnd:
             return # wait for more bytes
-        frame, self.buffer = self.buffer[comma+1:end], self.buffer[end:]
+        frame, self.buffer = self.buffer[frameBegin:frameEnd], self.buffer[frameEnd:]
         try:
             frame = json.loads(frame)
             socketId, frameType, data = frame[0], frame[1], frame[2:]
-            assert data  # XXX question for mario: why does 'data' need to be nonempty?
-                         #     couldn't close frames, for instance, have no args?
         except:
             return self.fatalError("cannot parse frame")
 
