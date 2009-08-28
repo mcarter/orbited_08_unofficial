@@ -1,7 +1,5 @@
 ;(function() {
 
-var JSON = CometSession.prototype.JSON;
-
 socket = {};
 
 socket.readyState = {
@@ -26,6 +24,7 @@ var frames = {
 };
 
 var Multiplexer = function(CometSession) {
+    var JSON = CometSession.prototype.JSON;
     if (multiplexer != null) {
         throw new Error("Multiplexer is a singleton");      
     }
