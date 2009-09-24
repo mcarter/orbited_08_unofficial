@@ -9,7 +9,7 @@ import urlparse
 logger = None
 
 
-def main():
+def main(start=True):
     try:
         import twisted
     except ImportError:
@@ -167,7 +167,10 @@ def main():
         prof.runcall(reactor.run)
         prof.close()
     else:
-        reactor.run()
+        if start:
+            reactor.run()
+        else:
+            return site
 
 
 def _setup_static(root, config):
