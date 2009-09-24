@@ -9,7 +9,7 @@ import urlparse
 logger = None
 
 
-def main(start=True):
+def main(start=True, argv=None):
     try:
         import twisted
     except ImportError:
@@ -63,9 +63,9 @@ def main(start=True):
         default=False,
         help="run Orbited on port 8000 and MorbidQ on port 61613"
     )
-
-    (options, args) = parser.parse_args()
-
+    if argv == None:
+        argv = sys.argv[1:]
+    (options, args) = parser.parse_args(argv)
     if args:
         print 'the "orbited" command does not accept positional arguments. type "orbited -h" for options.'
         sys.exit(1)
