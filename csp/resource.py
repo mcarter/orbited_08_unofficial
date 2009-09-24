@@ -34,7 +34,7 @@ class CSPLogicResource(resource.Resource):
     def render(self, request):
         print 'request', request.path, request.args
         if request.method.lower() == 'post':
-            request.args = cgi.parse_qs(request.content.read())
+            request.args['d'] =[request.content.read()]
         path = request.path.rsplit('/',1)[1]
         session = None
         if path != "handshake":

@@ -1,21 +1,28 @@
 ;(function() {
-if (!window.console) {
-    window.console = {
-        log: function() { }
-    }
+
+if (typeof(exports) == 'undefined') {
+    console.log('creating our own csp');
+    var global = window;
+}
+global.csp = {}
+var csp = global.csp;
+// For jsonp callbacks
+console.log('csp is', csp);
+
+if (typeof(require) != 'undefined' && require.__jsio) {
+    require('..base64');
+    require('..utf8')
 }
 var id = 0;
-csp = {
-    'readyState': {
-        'initial': 0,
-        'opening': 1,
-        'open':    2,
-        'closing': 3,
-        'closed':  4
-    }
+csp.readyState = {
+    'initial': 0,
+    'opening': 1,
+    'open':    2,
+    'closing': 3,
+    'closed':  4
 };
 csp.util = {};
-
+console.log('csp is', csp);
 // Add useful url parsing library to socket.util
 (function() {
 // parseUri 1.2.2
@@ -55,19 +62,25 @@ csp.util.isSameDomain = function(urlA, urlB) {
 }
 
 csp.util.chooseTransport = function(url, options) {
-    console.log('choosing');
+//    console.log(location.toString())
+    var test = location.toString().match('file://');
+    if (test && test.index === 0) {
+//      console.log('local file, use jsonp')
+      return transports.jsonp // XXX      
+    }
+//    console.log('choosing');
     if (csp.util.isSameDomain(url, location.toString())) {
-        console.log('same domain, xhr');
+//        console.log('same domain, xhr');
         return transports.xhr;
     }
-    console.log('not xhr');
+//    console.log('not xhr');
     try {
         if (window.XMLHttpRequest && (new XMLHttpRequest()).withCredentials !== undefined) {
-            console.log('xhr')
+//            console.log('xhr')
             return transports.xhr;
         }
     } catch(e) { }
-    console.log('jsonp');
+//    console.log('jsonp');
     return transports.jsonp
 }
 
@@ -87,31 +100,60 @@ csp.CometSession = function() {
     self.readyState = csp.readyState.initial;
     self.sessionKey = null;
     var transport = null;
+    var options = null;
+    var buffer = "";
     self.write = function() { throw new Error("invalid readyState"); }
     self.onopen = function() {
-//        console.log('onopen', self.sessionKey);
+        console.log('onopen', self.sessionKey);
     }
 
     self.onclose = function(code) {
-//        console.log('onclose', code);
+        console.log('onclose', code);
     }
 
     self.onread = function(data) {
-//        console.log('onread', data);
+        console.log('onread', data);
     }
-    self.connect = function(url, options) {
-        options = options || {};
+
+    self.setEncoding = function(encoding) {
+        switch(encoding) {
+            case 'plain':
+                if (buffer) {
+                    self.onread(buffer);
+                    buffer = "";
+                }
+                break;
+            case 'utf8':
+                break
+            default:
+                throw new Error("Invalid encoding")
+        }
+        options.encoding = encoding;
+    }
+
+    var transport_onread = function(data) {
+        if (options.encoding == 'utf8') {
+            self.onread(utf8.decode(data));
+        }
+        else if (options.encoding == 'plain') {
+            self.onread(data);
+        }
+    }
+
+    self.connect = function(url, _options) {
+        options = _options || {};
+        if (!options.encoding) { options.encoding = 'utf8' }
         var timeout = options.timeout || 10000;
         self.readyState = csp.readyState.opening;
         self.url = url;
-        console.log('c url', url);
+
         transport = new (csp.util.chooseTransport(url, options))(self.id, url, options);
         var handshakeTimer = window.setTimeout(self.close, timeout);
         transport.onHandshake = function(data) {
             self.readyState = csp.readyState.open;
             self.sessionKey = data.session;
             self.write = transport.send;
-            transport.onPacket = self.onread;
+            transport.onPacket = transport_onread;
             transport.resume(self.sessionKey, 0, 0);
             clearTimeout(handshakeTimer);
             self.onopen();
@@ -126,7 +168,7 @@ csp.CometSession = function() {
 }
 
 var Transport = function(cspId, url) {
-    console.log('url', url);
+//    console.log('url', url);
     var self = this;
     self.opened = false;
     self.cspId = cspId;
@@ -153,8 +195,15 @@ var Transport = function(cspId, url) {
             if (self.lastEventId != null && ackId != self.lastEventId+1)
                 throw new Error("CSP Transport Protocol Error");
             self.lastEventId = ackId;
-            if (encoding == 1) // percent encoding
-                data = unescape(data);
+            if (encoding == 1) { // base64 encoding
+                try {
+                    data = base64.decode(data);
+                } catch(e) {
+                    self.close()
+                    return;
+                }
+            }
+//            console.log('onPacket', data);
             self.onPacket(data);
         }
     }
@@ -172,6 +221,9 @@ var Transport = function(cspId, url) {
     }
     self.doSend = function() {
         throw new Error("Not Implemented");
+    }
+    self.close = function() {
+        self.stop();
     }
     self.stop = function() {
         self.opened = false;
@@ -193,9 +245,10 @@ var Transport = function(cspId, url) {
         }
     }
     self.handshakeErr = function() {
+        console.log('handshake err');
         if (self.opened) {
-//            handshakeTimer = setTimeout(self.handshake, backoff);
-//            backoff *= 2;
+            handshakeTimer = setTimeout(self.handshake, backoff);
+            backoff *= 2;
         }
     }
     self.sendCb = function() {
@@ -252,17 +305,25 @@ transports.xhr = function(cspId, url) {
         var xhr;
         if (type == 'send') { xhr = sendXhr; }
         if (type == 'comet') { xhr = cometXhr; }
+        url += '?'
+        for (key in args) {
+            if (key != 'd')
+                url += key + '=' + args[key] + '&';
+        }
+        var payload = "";
+        if (args.d) {
+            payload = args.d;
+        }
         xhr.open('POST', self.url + url, true);
         xhr.setRequestHeader('Content-Type', 'text/plain')
-        var payload = ""
-        for (key in args) {
-            payload += key + '=' + args[key] + '&';
-        }
-        payload = payload.substring(0, payload.length-1)
         var aborted = false;
         var timer = null;
 //        console.log('setting on ready state change');
         xhr.onreadystatechange = function() {
+//            console.log('ready state', xhr.readyState)
+            try {
+//              console.log('status', xhr.status)
+            } catch (e) {}
             if (aborted) { 
                 //console.log('aborted'); 
                 return eb(); 
@@ -295,14 +356,14 @@ transports.xhr = function(cspId, url) {
         if (timeout) {
             timer = setTimeout(function() { aborted = true; xhr.abort(); }, timeout*1000);
         }
-        console.log('send xhr', payload);
+//        console.log('send xhr', payload);
         xhr.send(payload)
 
     }
 
     this.handshake = function() {
         self.opened = true;
-        makeRequest("send", "/handshake", {}, self.handshakeCb, self.handshakeErr, 10);
+        makeRequest("send", "/handshake", { d:"{}" }, self.handshakeCb, self.handshakeErr, 10);
     }
     this.doSend = function() {
         var args;
@@ -317,26 +378,28 @@ transports.xhr = function(cspId, url) {
         var args = { s: self.sessionKey, a: self.lastEventId }
         makeRequest("comet", "/comet", args, self.cometCb, self.cometErr, 40);
     }
-    this.stop = function() {
-        Transport.stop.call(self);
-    }
     this.toPayload = function(data) {
-        var payload = escape(JSON.stringify([[++self.lastSentId, 0, data]]));
+        // TODO: only base64 encode sometimes.
+        var payload = JSON.stringify([[++self.lastSentId, 1, base64.encode(data)]]);
         return payload
     }
 }
-
-
-csp._jsonp = {};
+console.log('csp is', csp);
+console.log('global.csp is', global.csp);
+if (!global.csp) {
+    console.log('obliterate csp', global.csp);
+    global.csp = {}
+}
+global.csp._jsonp = {}
 var _jsonpId = 0;
 function setJsonpCallbacks(cb, eb) {
-    csp._jsonp['cb' + (++_jsonpId)] = cb;
-    csp._jsonp['eb' + (_jsonpId)] = eb;
+    global.csp._jsonp['cb' + (++_jsonpId)] = cb;
+    global.csp._jsonp['eb' + (_jsonpId)] = eb;
     return _jsonpId;
 }
 function removeJsonpCallback(id) {
-    delete csp._jsonp['cb' + id];
-    delete csp._jsonp['eb' + id];
+    delete global.csp._jsonp['cb' + id];
+    delete global.csp._jsonp['eb' + id];
 }
 function getJsonpErrbackPath(id) {
     return 'parent.csp._jsonp.eb' + id;
@@ -374,13 +437,12 @@ transports.jsonp = function(cspId, url) {
     }
     var rId = 0;
     var makeRequest = function(rType, url, args, cb, eb, timeout) {
-//        console.log('makeRequest', rType, url, args, cb, eb, timeout);
-
+        args.n = Math.random();
         window.setTimeout(function() {
             var temp = ifr[rType];
             // IE6+ uses contentWindow.document, the others use temp.contentDocument.
             var doc = temp.contentDocument || temp.contentWindow.document || temp.document;
-            var head = doc.getElementsByTagName('head')[0];
+            var head = doc.getElementsByTagName('head')[0] || doc.getElementsByTagName('body')[0];
             var errorSuppressed = false;
             function errback(isIe) {
                 if (!isIe) {
@@ -445,7 +507,10 @@ transports.jsonp = function(cspId, url) {
 
     this.handshake = function() {
         self.opened = true;
-        makeRequest("send", "/handshake", {}, self.handshakeCb, self.handshakeErr, 10);
+        // This setTimeout is necessary to avoid timing issues with the iframe onload status
+        setTimeout(function() {
+            makeRequest("send", "/handshake", {d: "{}"}, self.handshakeCb, self.handshakeErr, 10)
+        }, 0);
     }
     this.doSend = function() {
         var args;
@@ -460,273 +525,13 @@ transports.jsonp = function(cspId, url) {
         var args = { s: self.sessionKey, a: self.lastEventId }
         makeRequest("comet", "/comet", args, self.cometCb, self.cometErr, 40);
     }
-    this.stop = function() {
-        Transport.stop.call(self);
-    }
     this.toPayload = function(data) {
-        var payload = escape(JSON.stringify([[++self.lastSentId, 0, data]])); // XXX: firefox only!
+        // TODO: don't always base64?
+        var payload = JSON.stringify([[++self.lastSentId, 1, base64.encode(data)]]);
         return payload
     }
     document.body.appendChild(ifr.send);
     document.body.appendChild(ifr.comet);
     killLoadingBar();
 }
-
-
-
-
-
-
-
-// Add csp.JSON 
-/*
-    http://www.JSON.org/json2.js
-    2009-06-29
-
-    Public Domain.
-
-    NO WARRANTY EXPRESSED OR IMPLIED. USE AT YOUR OWN RISK.
-    This code should be minified before deployment.
-    See http://javascript.crockford.com/jsmin.html
-
-*/
-
-
-var JSON = {};
-csp.JSON = JSON;
-csp.CometSession.prototype.JSON = JSON;
-(function () {
-
-    function f(n) {
-        // Format integers to have at least two digits.
-        return n < 10 ? '0' + n : n;
-    }
-
-    if (typeof Date.prototype.toJSON !== 'function') {
-
-        Date.prototype.toJSON = function (key) {
-
-            return isFinite(this.valueOf()) ?
-                   this.getUTCFullYear()   + '-' +
-                 f(this.getUTCMonth() + 1) + '-' +
-                 f(this.getUTCDate())      + 'T' +
-                 f(this.getUTCHours())     + ':' +
-                 f(this.getUTCMinutes())   + ':' +
-                 f(this.getUTCSeconds())   + 'Z' : null;
-        };
-
-        String.prototype.toJSON =
-        Number.prototype.toJSON =
-        Boolean.prototype.toJSON = function (key) {
-            return this.valueOf();
-        };
-    }
-
-    var cx = /[\u0000\u00ad\u0600-\u0604\u070f\u17b4\u17b5\u200c-\u200f\u2028-\u202f\u2060-\u206f\ufeff\ufff0-\uffff]/g,
-        escapable = /[\\\"\x00-\x1f\x7f-\x9f\u00ad\u0600-\u0604\u070f\u17b4\u17b5\u200c-\u200f\u2028-\u202f\u2060-\u206f\ufeff\ufff0-\uffff]/g,
-        gap,
-        indent,
-        meta = {    // table of character substitutions
-            '\b': '\\b',
-            '\t': '\\t',
-            '\n': '\\n',
-            '\f': '\\f',
-            '\r': '\\r',
-            '"' : '\\"',
-            '\\': '\\\\'
-        },
-        rep;
-
-
-    function quote(string) {
-
-        escapable.lastIndex = 0;
-        return escapable.test(string) ?
-            '"' + string.replace(escapable, function (a) {
-                var c = meta[a];
-                return typeof c === 'string' ? c :
-                    '\\u' + ('0000' + a.charCodeAt(0).toString(16)).slice(-4);
-            }) + '"' :
-            '"' + string + '"';
-    }
-
-
-    function str(key, holder) {
-
-
-        var i,          // The loop counter.
-            k,          // The member key.
-            v,          // The member value.
-            length,
-            mind = gap,
-            partial,
-            value = holder[key];
-
-
-        if (value && typeof value === 'object' &&
-                typeof value.toJSON === 'function') {
-            value = value.toJSON(key);
-        }
-
-
-        if (typeof rep === 'function') {
-            value = rep.call(holder, key, value);
-        }
-
-
-        switch (typeof value) {
-        case 'string':
-            return quote(value);
-
-        case 'number':
-
-
-            return isFinite(value) ? String(value) : 'null';
-
-        case 'boolean':
-        case 'null':
-
-
-
-            return String(value);
-
-        case 'object':
-
-            if (!value) {
-                return 'null';
-            }
-
-            gap += indent;
-            partial = [];
-
-            if (Object.prototype.toString.apply(value) === '[object Array]') {
-
-
-                length = value.length;
-                for (i = 0; i < length; i += 1) {
-                    partial[i] = str(i, value) || 'null';
-                }
-
-                v = partial.length === 0 ? '[]' :
-                    gap ? '[\n' + gap +
-                            partial.join(',\n' + gap) + '\n' +
-                                mind + ']' :
-                          '[' + partial.join(',') + ']';
-                gap = mind;
-                return v;
-            }
-
-            if (rep && typeof rep === 'object') {
-                length = rep.length;
-                for (i = 0; i < length; i += 1) {
-                    k = rep[i];
-                    if (typeof k === 'string') {
-                        v = str(k, value);
-                        if (v) {
-                            partial.push(quote(k) + (gap ? ': ' : ':') + v);
-                        }
-                    }
-                }
-            } else {
-
-
-                for (k in value) {
-                    if (Object.hasOwnProperty.call(value, k)) {
-                        v = str(k, value);
-                        if (v) {
-                            partial.push(quote(k) + (gap ? ': ' : ':') + v);
-                        }
-                    }
-                }
-            }
-
-            v = partial.length === 0 ? '{}' :
-                gap ? '{\n' + gap + partial.join(',\n' + gap) + '\n' +
-                        mind + '}' : '{' + partial.join(',') + '}';
-            gap = mind;
-            return v;
-        }
-    }
-
-    if (typeof JSON.stringify !== 'function') {
-        JSON.stringify = function (value, replacer, space) {
-
-            var i;
-            gap = '';
-            indent = '';
-
-
-            if (typeof space === 'number') {
-                for (i = 0; i < space; i += 1) {
-                    indent += ' ';
-                }
-
-
-            } else if (typeof space === 'string') {
-                indent = space;
-            }
-
-
-            rep = replacer;
-            if (replacer && typeof replacer !== 'function' &&
-                    (typeof replacer !== 'object' ||
-                     typeof replacer.length !== 'number')) {
-                throw new Error('JSON.stringify');
-            }
-
-            return str('', {'': value});
-        };
-    }
-
-    if (typeof JSON.parse !== 'function') {
-        JSON.parse = function (text, reviver) {
-
-            var j;
-
-            function walk(holder, key) {
-
-                var k, v, value = holder[key];
-                if (value && typeof value === 'object') {
-                    for (k in value) {
-                        if (Object.hasOwnProperty.call(value, k)) {
-                            v = walk(value, k);
-                            if (v !== undefined) {
-                                value[k] = v;
-                            } else {
-                                delete value[k];
-                            }
-                        }
-                    }
-                }
-                return reviver.call(holder, key, value);
-            }
-
-            cx.lastIndex = 0;
-            if (cx.test(text)) {
-                text = text.replace(cx, function (a) {
-                    return '\\u' +
-                        ('0000' + a.charCodeAt(0).toString(16)).slice(-4);
-                });
-            }
-
-            if (/^[\],:{}\s]*$/.
-test(text.replace(/\\(?:["\\\/bfnrt]|u[0-9a-fA-F]{4})/g, '@').
-replace(/"[^"\\\n\r]*"|true|false|null|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?/g, ']').
-replace(/(?:^|:|,)(?:\s*\[)+/g, ''))) {
-
-                j = eval('(' + text + ')');
-
-
-                return typeof reviver === 'function' ?
-                    walk({'': j}, '') : j;
-            }
-
-            throw new SyntaxError('JSON.parse');
-        };
-    }
-}());
 })();
-
-
-
-

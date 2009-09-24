@@ -24,7 +24,7 @@ var frames = {
 };
 
 var Multiplexer = function(CometSession) {
-    var JSON = CometSession.prototype.JSON;
+//    var JSON = CometSession.prototype.JSON || JSON;
     if (multiplexer != null) {
         throw new Error("Multiplexer is a singleton");      
     }
@@ -47,7 +47,7 @@ var Multiplexer = function(CometSession) {
     self.buffer = "";
     self.sockets = {};
     self.csp = new CometSession();
-    self.csp.connect("http://" + socket.settings.hostname + ":" + socket.settings.port);// XXX: detect properly
+    self.csp.connect("http://" + socket.settings.hostname + ":" + socket.settings.port, { encoding: 'plain' });// XXX: detect properly
     self.csp.onopen = function() {
         for (id in self.sockets)
             self.sockets[id].onopen();

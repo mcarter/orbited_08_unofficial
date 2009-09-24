@@ -2,6 +2,7 @@ import urllib
 from twisted.web import server
 from twisted.internet import reactor
 from util import json, compress
+import base64
 
 class CSPSession(object):
     # SPEC NOTE: added killTimeout (defaults to 10 seconds)
@@ -167,7 +168,7 @@ class CSPSession(object):
         if data is None: # TODO: only encode non-ascii data
             frame = [self.sendId, 0, data]
         else:
-            frame = [self.sendId, 1, urllib.quote(data)]
+            frame = [self.sendId, 1, base64.b64encode(data)]
         self.buffer.append(frame)
         if self.request:
             if self.permVars["is"]:
@@ -198,7 +199,7 @@ class CSPSession(object):
                 continue
             self.lastReceived = key
             if encoding == 1:
-                data = urllib.unquote(data)
+                data = base64.b64decode(data + '==')
             self.protocol.dataReceived(data)
 
     def sendPackets(self, packets=None, finish=False):
