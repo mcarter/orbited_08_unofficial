@@ -1,6 +1,8 @@
 from twisted.internet import reactor, protocol
 from csp.port import CometPort
 from csp.util import json
+from orbited import logging
+from orbited.config import map as config
 
 FRAME_OPEN  = 0
 FRAME_CLOSE = 1
@@ -17,9 +19,11 @@ CODES = {
 }
 
 class Outgoing(protocol.Protocol):
-    def __init__(self, incoming, socketId):
+    def __init__(self, incoming, socketId, host, port):
         self.incoming = incoming
         self.socketId = socketId
+        self.host = host
+        self.port = port
 
     def connectionMade(self):
         self.incoming.newOutgoing(self)
@@ -28,15 +32,18 @@ class Outgoing(protocol.Protocol):
         self.incoming.write([self.socketId, FRAME_DATA, data])
 
     def connectionLost(self, reason):
+        peer = self.incoming.getPeer()      
+        self.logger.access('connection closed connection from %s:%s to %s:%d' % (peer.host, peer.port, self.host, self.port))        
         self.incoming.closeStream(self.socketId, 'RemoteConnectionClosed')
 
 class Incoming(protocol.Protocol):
+    logger = logging.get_logger('proxy.Incoming')
     def connectionMade(self):
         self.buffer = ""
         self.buffers = {}
         self.sockets = {}
         self.active = True
-        print 'connectionMade'
+        self.logger.debug('connectionMade')
         
     def write(self, rawdata):
         # XXX: The next line of code can cause an error, like this:
@@ -73,7 +80,7 @@ exceptions.UnicodeDecodeError: 'utf8' codec can't decode bytes in position 448-4
         self.transport.write(str(len(data)) + data)
 
     def connectionLost(self):
-        print "connectionLost"
+        self.logger.debug("connectionLost")
         self.active = False
         self.buffer = ""
         for key in self.buffers.keys():
@@ -83,13 +90,10 @@ exceptions.UnicodeDecodeError: 'utf8' codec can't decode bytes in position 448-4
             sock.transport.loseConnection()
 
     def fatalError(self, msg):
-        print "fatal error:",msg
+        self.logger.warn(msg)
         self.transport.loseConnection()
 
     def closeStream(self, socketId, code, *args):
-        if args:
-            print self, socketId, code, args
-            raise Exception("BAD");
         if self.active:
             if socketId in self.sockets:
                 self.sockets[socketId].transport.loseConnection()
@@ -107,17 +111,15 @@ exceptions.UnicodeDecodeError: 'utf8' codec can't decode bytes in position 448-4
         del self.buffers[key]
 
     def processFrame(self, socketId, frameType, *data):
-#        print 'processFrame', data
         if frameType == FRAME_CLOSE:
             return self.closeStream(socketId, 'UserConnectionReset')
         if frameType == FRAME_DATA:        
-#            print 'read', data[0]
             return self.sockets[socketId].transport.write(str(data[0]))
             
         return self.closeStream(socketId, 'ProtocolError')
         
     def dataReceived(self, rawdata=""):
-#        print 'dataReceived:',rawdata
+        self.logger.debug('dataReceived:',rawdata)
         # extract first frame
         self.buffer += rawdata
         frameBegin = self.buffer.find('[')
@@ -151,9 +153,19 @@ exceptions.UnicodeDecodeError: 'utf8' codec can't decode bytes in position 448-4
                 host, port = data
             except:
                 return self.closeStream(socketId, 'InvalidHandshake')
-            if False: # XXX: here, make sure this connection is allowed
-                return self.closeStream(socketId, 'Unauthorized')
-            out = protocol.ClientCreator(reactor, Outgoing, self, socketId)
+            peer = self.transport.getPeer()
+            allowed = False
+            for source in config['[access]'].get((host, port), []):
+                if source == '*' or source == self.transport.hostHeader:
+                    allowed = True
+                    break
+            if not allowed:
+                self.logger.warn('Unauthorized connect from %r:%d to %r:%d' % (peer.host, peer.port, host, port))
+                self.closeStream(socketId, 'Unauthorized')
+                return
+            
+            self.logger.access('new connection from %s:%s to %s:%d' % (peer.host, peer.port, host, port))
+            out = protocol.ClientCreator(reactor, Outgoing, self, socketId, host, port)
             out.connectTCP(host, port).addErrback(lambda x: self.closeStream(socketId,'RemoteConnectionFailed'))
             self.buffers[socketId] = []
 
@@ -163,7 +175,3 @@ exceptions.UnicodeDecodeError: 'utf8' codec can't decode bytes in position 448-4
 class ProxyFactory(protocol.Factory):
     protocol = Incoming
 
-if __name__ == "__main__":
-    print "proxy listening on CSP@8050"
-    reactor.listenWith(CometPort, port=8050, factory=ProxyFactory())
-    reactor.run()

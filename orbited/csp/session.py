@@ -4,6 +4,10 @@ from twisted.internet import reactor
 from util import json, compress
 import base64
 
+from orbited import logging
+
+logger = logging.get_logger('CSPSession')
+
 class CSPSession(object):
     # SPEC NOTE: added killTimeout (defaults to 10 seconds)
     #           
@@ -12,6 +16,7 @@ class CSPSession(object):
     def __init__(self, key, request, destroySessionCb, killTimeout):
         self.peer = request.client
         self.host = request.host
+        self.hostHeader = request.received_headers.get('host', '')
         self.destroySessionCb = destroySessionCb
         self.killTimeout = killTimeout
         self.key = key
@@ -182,6 +187,7 @@ class CSPSession(object):
             self.write(datum)
 
     def loseConnection(self):        
+        logger.info('loseConnection called', stack=True)
         self.close()
     
     def getHost(self):
@@ -192,7 +198,7 @@ class CSPSession(object):
 
     def read(self, rawdata):
         # parse packets, throw out duplicates, forward to protocol
-        print 'parse', repr(rawdata)
+        logger.debug('parse', repr(rawdata))
         packets = json.loads(rawdata)
         for key, encoding, data in packets:
             if self.lastReceived >= key:
@@ -229,5 +235,5 @@ class CSPSession(object):
     def renderRequest(self, data, request):
         request.setHeader('Content-type', self.permVars['ct'])
         x = self.tryCompress("%s(%s)%s"%(self.permVars["rp"], json.dumps(data), self.permVars["rs"]), request)
-        print x
+        logger.debug('render request', x)
         return x

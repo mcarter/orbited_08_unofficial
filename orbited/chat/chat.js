@@ -199,7 +199,8 @@ irc.onerror = function(command) {
 //      quit();
     })
   }
-  irc.onclose = function() {
+  irc.onclose = function(code) {
+    alert('onclose ' + code);
     log.debug("closed...");  
   };
   irc.onNICK = function(command) {

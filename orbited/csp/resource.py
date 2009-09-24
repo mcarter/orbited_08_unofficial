@@ -1,8 +1,11 @@
 import os, uuid, cgi
 from twisted.web import resource, static
 from session import CSPSession
+from orbited import logging
 
 class CSPRootResource(resource.Resource):
+    logger = logging.get_logger('CSPRootResource')
+    
     def __init__(self, killTimeout):
         resource.Resource.__init__(self)
         logic = CSPLogicResource(self)
@@ -27,12 +30,13 @@ class CSPRootResource(resource.Resource):
         del self.sessions[session.key]
 
 class CSPLogicResource(resource.Resource):
+    logger = logging.get_logger('CSPLogicResource')
     def __init__(self, root):
         resource.Resource.__init__(self)
         self.root = root
 
     def render(self, request):
-        print 'request', request.path, request.args
+        self.logger.debug('request', request.path, request.args)
         if request.method.lower() == 'post':
             request.args['d'] =[request.content.read()]
         path = request.path.rsplit('/',1)[1]
