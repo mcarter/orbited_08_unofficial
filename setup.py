@@ -32,7 +32,7 @@ setup(
             static_types ] or [] for (d, s, f) in os.walk(os.path.join('orbited', 'static'))
         ]) },
     zip_safe = False,
-    install_requires = ['csp', 'Twisted'],
+    install_requires = ['csp>=0.1alpha2', 'Twisted'],
     entry_points = '''    
         [console_scripts]
         orbited = orbited.start:main
