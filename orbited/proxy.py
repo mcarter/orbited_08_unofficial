@@ -1,8 +1,11 @@
 from twisted.internet import reactor, protocol
-from csp.port import CometPort
-from csp.util import json
 from orbited import logging
 from orbited.config import map as config
+
+try:
+    import json
+except:
+    import simplejson as json
 
 FRAME_OPEN  = 0
 FRAME_CLOSE = 1
@@ -19,6 +22,7 @@ CODES = {
 }
 
 class Outgoing(protocol.Protocol):
+    logger = logging.get_logger('proxy.Outgoing')
     def __init__(self, incoming, socketId, host, port):
         self.incoming = incoming
         self.socketId = socketId
@@ -32,7 +36,7 @@ class Outgoing(protocol.Protocol):
         self.incoming.write([self.socketId, FRAME_DATA, data])
 
     def connectionLost(self, reason):
-        peer = self.incoming.getPeer()      
+        peer = self.incoming.transport.getPeer()      
         self.logger.access('connection closed connection from %s:%s to %s:%d' % (peer.host, peer.port, self.host, self.port))        
         self.incoming.closeStream(self.socketId, 'RemoteConnectionClosed')
 
