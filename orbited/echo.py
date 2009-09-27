@@ -1,5 +1,5 @@
 from twisted.internet import reactor, protocol
-from csp.port import CometPort
+from csp.twisted.port import CometPort
 
 class Echo(protocol.Protocol):
     def dataReceived(self, data):
@@ -9,6 +9,6 @@ class EchoFactory(protocol.Factory):
     protocol = Echo
 
 if __name__ == "__main__":
-    print "echo listening on CSP@8050"
-    reactor.listenWith(CometPort, port=8050, factory=EchoFactory())
+    print "echo listening on CSP@8000"
+    reactor.listenWith(CometPort, port=8000, factory=EchoFactory())
     reactor.run()
