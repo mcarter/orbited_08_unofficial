@@ -120,7 +120,7 @@ def main(start=True, argv=None):
         
         
     if 'INDEX' in config.map['[static]']:
-        root = static.File(val)
+        root = static.File(config.map['[static]']['INDEX'])
     else:
         root = resource.Resource()
     static_files = static.File(os.path.join(os.path.dirname(__file__), 'static'))
