@@ -8,6 +8,9 @@ import urlparse
 # NB: this is set after we load the configuration at "main".
 logger = None
 
+def _import(name):
+    module_import = name.rsplit('.', 1)[0]
+    return reduce(getattr, name.split('.')[1:], __import__(module_import))
 
 def main(start=True, argv=None):
     try:
