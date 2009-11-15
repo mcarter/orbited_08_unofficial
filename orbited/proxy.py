@@ -2,10 +2,26 @@ from twisted.internet import reactor, protocol
 from orbited import logging
 from orbited.config import map as config
 
-try:
-    import json
-except:
-    import simplejson as json
+"""
+works like this:
+OPEN
+upstream:
+length_after_colon:id,0host,port
+
+downstream:
+length_after_colon:id,0
+-----
+CLOSE
+upstream:
+length_after_colon:id,1
+
+downstream:
+length_after_colon:id,1errcode
+-----
+DATA
+upstream/downstream:
+length_after_colon:id,2datadatadata
+"""
 
 FRAME_OPEN  = 0
 FRAME_CLOSE = 1
@@ -33,7 +49,7 @@ class Outgoing(protocol.Protocol):
         self.incoming.newOutgoing(self)
 
     def dataReceived(self, data):
-        self.incoming.write([self.socketId, FRAME_DATA, data])
+        self.incoming.write(self.socketId, FRAME_DATA, data)
 
     def connectionLost(self, reason):
         peer = self.incoming.transport.getPeer()      
@@ -49,39 +65,11 @@ class Incoming(protocol.Protocol):
         self.active = True
         self.logger.debug('connectionMade')
         
-    def write(self, rawdata):
-        # XXX: The next line of code can cause an error, like this:
-        #       -mcarter 11/8/09
-        """
-Traceback (most recent call last):
-  File "/usr/lib/python2.5/site-packages/Twisted-8.2.0-py2.5-linux-x86_64.egg/twisted/python/log.py", line 84, in callWithLogger
-    return callWithContext({"system": lp}, func, *args, **kw)
-  File "/usr/lib/python2.5/site-packages/Twisted-8.2.0-py2.5-linux-x86_64.egg/twisted/python/log.py", line 69, in callWithContext
-    return context.call({ILogContext: newCtx}, func, *args, **kw)
-  File "/usr/lib/python2.5/site-packages/Twisted-8.2.0-py2.5-linux-x86_64.egg/twisted/python/context.py", line 59, in callWithContext
-    return self.currentContext().callWithContext(ctx, func, *args, **kw)
-  File "/usr/lib/python2.5/site-packages/Twisted-8.2.0-py2.5-linux-x86_64.egg/twisted/python/context.py", line 37, in callWithContext
-    return func(*args,**kw)
---- <exception caught here> ---
-  File "/usr/lib/python2.5/site-packages/Twisted-8.2.0-py2.5-linux-x86_64.egg/twisted/internet/selectreactor.py", line 146, in _doReadOrWrite
-    why = getattr(selectable, method)()
-  File "/usr/lib/python2.5/site-packages/Twisted-8.2.0-py2.5-linux-x86_64.egg/twisted/internet/tcp.py", line 463, in doRead
-    return self.protocol.dataReceived(data)
-  File "proxy.py", line 28, in dataReceived
-    self.incoming.write([self.socketId, FRAME_DATA, data])
-  File "proxy.py", line 42, in write
-    data = json.dumps(rawdata)
-  File "build/bdist.linux-x86_64/egg/simplejson/__init__.py", line 230, in dumps
-    
-  File "build/bdist.linux-x86_64/egg/simplejson/encoder.py", line 200, in encode
-    
-  File "build/bdist.linux-x86_64/egg/simplejson/encoder.py", line 260, in iterencode
-    
-exceptions.UnicodeDecodeError: 'utf8' codec can't decode bytes in position 448-450: invalid data
-            
-        """
-        data = json.dumps(rawdata)
-        self.transport.write(str(len(data)) + data)
+    def write(self, sid, ftype, data=""):
+        s = "%s,%s%s"%(sid, ftype, data)
+        s = "%s:%s"%(len(s), s)
+        self.logger.debug('write: %s'%(s,))
+        self.transport.write(s)
 
     def connectionLost(self):
         self.logger.debug("connectionLost")
@@ -93,7 +81,7 @@ exceptions.UnicodeDecodeError: 'utf8' codec can't decode bytes in position 448-4
             del self.sockets[key]
             sock.transport.loseConnection()
 
-    def fatalError(self, msg):
+    def fatalError(self, msg): # not used right now...
         self.logger.warn(msg)
         self.transport.loseConnection()
 
@@ -104,57 +92,53 @@ exceptions.UnicodeDecodeError: 'utf8' codec can't decode bytes in position 448-4
                 del self.sockets[socketId]
             if socketId in self.buffers:
                 del self.buffers[socketId]
-            self.write([socketId, FRAME_CLOSE, CODES[code]])
+            self.write(socketId, FRAME_CLOSE, CODES[code])
 
     def newOutgoing(self, outgoing):
         key = outgoing.socketId
         self.sockets[key] = outgoing
-        self.write([key, FRAME_OPEN])
+        self.write(key, FRAME_OPEN)
         for frame in self.buffers[key]:
             self.processFrame(*frame)
         del self.buffers[key]
 
-    def processFrame(self, socketId, frameType, *data):
+    def processFrame(self, socketId, frameType, data):
+        self.logger.debug('processFrame: %s %s %s'%(socketId, frameType, data))
         if frameType == FRAME_CLOSE:
             return self.closeStream(socketId, 'UserConnectionReset')
         if frameType == FRAME_DATA:        
-            return self.sockets[socketId].transport.write(str(data[0]))
-            
+            return self.sockets[socketId].transport.write(data)
         return self.closeStream(socketId, 'ProtocolError')
         
     def dataReceived(self, rawdata=""):
-        self.logger.debug('dataReceived:',rawdata)
-        # extract first frame
         self.buffer += rawdata
-        frameBegin = self.buffer.find('[')
-        if frameBegin == -1:
+        self.logger.debug('dataReceived:',rawdata)
+        lFlag = self.buffer.find(':')
+        if lFlag == -1:
             return # wait for more bytes
-        try:
-            size = int(self.buffer[:frameBegin])
-        except:
-            return self.fatalError("non-integer frame size")
-        frameEnd = frameBegin + size
-        if len(self.buffer) < frameEnd:
+        lStr = self.buffer[:lFlag]
+        length = int(lStr) + len(lStr) + 1 # total packet length
+        if len(self.buffer) < length:
             return # wait for more bytes
-        frame, self.buffer = self.buffer[frameBegin:frameEnd], self.buffer[frameEnd:]
-        try:
-            frame = json.loads(frame)
-            socketId, frameType, data = frame[0], frame[1], frame[2:]
-        except:
-            return self.fatalError("cannot parse frame")
+        iFlag = self.buffer.find(',')
+        socketId = int(self.buffer[lFlag+1:iFlag])
+        frameType = int(self.buffer[iFlag+1:iFlag+2])
+        data = self.buffer[iFlag+2:length]
+        self.buffer = self.buffer[length:]
 
         # established stream
         if socketId in self.sockets:
-            self.processFrame(*frame)
+            self.processFrame(socketId, frameType, data)
 
         # handshake
         else:
             if socketId in self.buffers:
-                return self.buffers[socketId].append(frame)
+                return self.buffers[socketId].append([socketId, frameType, data])
             if frameType != FRAME_OPEN:
                 return self.closeStream(socketId, 'ProtocolError')
             try:
-                host, port = data
+                host, port = data.split(',')
+                port = int(port)
             except:
                 return self.closeStream(socketId, 'InvalidHandshake')
             peer = self.transport.getPeer()
