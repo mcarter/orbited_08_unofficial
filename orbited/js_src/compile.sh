@@ -1,2 +1,2 @@
-#!/bin/env bash
-jsio_compile orbited.pkg -j /home/desmaj/projects/js.io/jsio -o ../static/orbited.js
+#!/bin/bash
+jsio_compile orbited.pkg -j /home/mario/Desktop/js.io/jsio -o ../static/Orbited.js
