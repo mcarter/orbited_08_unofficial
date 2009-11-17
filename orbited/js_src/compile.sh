@@ -1,2 +1,4 @@
 #!/bin/bash
-jsio_compile orbited.pkg --vv -j /home/mario/stuff/js.io/jsio -o ../static/Orbited.js
+echo "enter the location of jsio"
+read jsio
+jsio_compile orbited.pkg --vv -j $jsio -o ../static/Orbited.js
