@@ -19,7 +19,7 @@ static_types = [
 
 setup(
     name='orbited',
-    version='0.8.0alpha2',
+    version='0.8.0beta1',
     author='Michael Carter',
     author_email='CarterMichael@gmail.com',
     url='http://www.orbited.org',
