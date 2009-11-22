@@ -1,11 +1,13 @@
 jsio('import Class');
+jsio('import jsio.logging');
 jsio('from jsio.protocols.mspp import MSPPStream, MSPPProtocol');
 
-var multiplexer = null;
+exports.logging = jsio.logging;
 
 // autodetect host + port!!!
 exports.settings = { 'host': 'localhost', 'port': 8000, 'path': '/csp'};
 
+var multiplexer = null;
 exports.TCPSocket = Class(MSPPStream, function() {
     this.init = function() {
         this.setEncoding('plain');
