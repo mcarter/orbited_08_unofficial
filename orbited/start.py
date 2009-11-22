@@ -1,4 +1,3 @@
-from twisted.internet import reactor
 import config
 import logging
 import os
