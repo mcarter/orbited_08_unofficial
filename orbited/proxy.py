@@ -68,6 +68,7 @@ class Incoming(protocol.Protocol):
     def write(self, sid, ftype, data=""):
         s = "%s,%s%s"%(sid, ftype, data)
         s = "%s:%s"%(len(s), s)
+        print "SEND", repr(s)
         self.logger.debug('write: %s'%(s,))
         self.transport.write(s)
 
@@ -106,8 +107,9 @@ class Incoming(protocol.Protocol):
         self.logger.debug('processFrame: %s %s %s'%(socketId, frameType, data))
         if frameType == FRAME_CLOSE:
             return self.closeStream(socketId, 'UserConnectionReset')
-        if frameType == FRAME_DATA:        
-            return self.sockets[socketId].transport.write(data)
+        if frameType == FRAME_DATA:
+            print 'READ', repr(data.encode('ascii'))
+            return self.sockets[socketId].transport.write(data.encode("ascii"))
         return self.closeStream(socketId, 'ProtocolError')
         
     def dataReceived(self, rawdata=""):
