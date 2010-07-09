@@ -127,8 +127,7 @@ def main(start=True, argv=None):
     # Note: hard coding timeout to 120. 
     site = server.Site(root, timeout=120)
     from proxy import ProxyFactory
-    import csp
-    from csp.twisted.port import CometPort
+    from csp_twisted import CometPort
 
     reactor.listenWith(CometPort, factory=ProxyFactory(), resource=root, childName='csp')
     _setup_static(root, config.map)
